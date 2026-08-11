@@ -1,0 +1,210 @@
+            score = 0
+            if "公園" in text:
+                score += 4
+            if "緑地" in text:
+                score += 3
+            if str(res.get("format", "")).upper() == "ZIP" or str(res.get("url", "")).lower().endswith(".zip"):
+                score += 2
+            ranked.append((score, res))
+        ranked.sort(key=lambda x: x[0], reverse=True)
+        if not ranked or ranked[0][0] < 6:
+            raise RuntimeError("park/green-space ZIP resource not identified")
+        res = ranked[0][1]
+        report["resource"] = res
+        zip_rec = download("tokyo_green_parks", res["url"], "tokyo-green-parks.zip", min_bytes=1000)
+        if zip_rec.status != "downloaded":
+            raise RuntimeError(zip_rec.note or "download failed")
+        extract_dir = RAW / "tokyo-green-parks"
+        extract_dir.mkdir(exist_ok=True)
+        with zipfile.ZipFile(OUT / zip_rec.path) as zf:
+            zf.extractall(extract_dir)
+        shp_files = sorted(extract_dir.rglob("*.shp"))
+        if not shp_files:
+            raise RuntimeError("no shapefile in park resource")
+        selected_rows = []
+        for shp in shp_files:
+            try:
+                frame = gpd.read_file(shp)
+            except Exception as exc:  # noqa: BLE001
+                report.setdefault("read_errors", []).append({"file": str(shp), "error": str(exc)})
+                continue
+            if frame.empty:
+                continue
+            string_columns = [c for c in frame.columns if c != frame.geometry.name]
+            mask = np.zeros(len(frame), dtype=bool)
+            for col in string_columns:
+                try:
+                    mask |= frame[col].astype(str).str.contains("横網", na=False).to_numpy()
+                except Exception:
+                    pass
+            if mask.any():
+                subset = frame.loc[mask].copy()
+                if subset.crs is None:
+                    report.setdefault("warnings", []).append(f"missing CRS: {shp}")
+                    continue
+                subset = subset.to_crs(4326)
+                for _, row in subset.iterrows():
+                    props = {k: row[k] for k in subset.columns if k != subset.geometry.name}
+                    geom = row.geometry
+                    area_m2 = gpd.GeoSeries([geom], crs=4326).to_crs(6677).area.iloc[0]
+                    selected_rows.append({"file": str(shp.relative_to(extract_dir)), "props": props, "geometry": geom, "area_m2": float(area_m2)})
+        report["candidates"] = [
+            {"file": r["file"], "props": {k: str(v) for k, v in r["props"].items()}, "area_m2": r["area_m2"]}
+            for r in selected_rows
+        ]
+        if not selected_rows:
+            raise RuntimeError("横網 feature not found")
+        selected_rows.sort(key=lambda r: abs(r["area_m2"] - CURRENT_PARK_OFFICIAL_M2))
+        chosen = selected_rows[0]
+        report.update({"status": "selected", "chosen_area_m2": chosen["area_m2"], "chosen_file": chosen["file"]})
+        return chosen["geometry"], report
+    except Exception as exc:  # noqa: BLE001
+        report.update({"status": "failed", "error": f"{type(exc).__name__}: {exc}"})
+        return None, report
+
+
+def overpass_features() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    report: dict[str, Any] = {"status": "not_started", "endpoint": None}
+    query = r'''[out:json][timeout:120];
+(
+  nwr["name"~"横網町公園|第一ホテル両国|両国中学校|江戸東京博物館"](around:1600,35.6993,139.7955);
+  nwr["name:en"~"Yokoamicho Park|Dai-ichi Hotel Ryogoku|Ryogoku Junior High School|Edo-Tokyo Museum",i](around:1600,35.6993,139.7955);
+);
+out geom tags;'''
+    endpoints = [
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass.nchc.org.tw/api/interpreter",
+    ]
+    last_error = None
+    for endpoint in endpoints:
+        try:
+            r = SESSION.post(endpoint, data={"data": query}, timeout=(30, 240))
+            r.raise_for_status()
+            data = r.json()
+            safe_json(RAW / "overpass-modern-features.json", data)
+            if osm2geojson is None:
+                raise RuntimeError("osm2geojson is unavailable")
+            gj = osm2geojson.json2geojson(data)
+            safe_json(RAW / "overpass-modern-features.geojson", gj)
+            feats = gj.get("features", [])
+            report.update({"status": "downloaded", "endpoint": endpoint, "feature_count": len(feats)})
+            return feats, report
+        except Exception as exc:  # noqa: BLE001
+            last_error = f"{endpoint}: {type(exc).__name__}: {exc}"
+    report.update({"status": "failed", "error": last_error})
+    return [], report
+
+
+def classify_feature(name: str) -> str | None:
+    n = name.lower().replace(" ", "")
+    if "横網町公園" in name or "yokoamichopark" in n:
+        return "park"
+    if "第一ホテル両国" in name or "dai-ichihotelryogoku" in n or "daiichihotelryogoku" in n:
+        return "hotel"
+    if "両国中学校" in name or "ryogokujuniorhighschool" in n:
+        return "school"
+    if "江戸東京博物館" in name or "edo-tokyomuseum" in n or "edotokyomuseum" in n:
+        return "museum"
+    return None
+
+
+def extract_modern_geometries(features: list[dict[str, Any]], official_park: Any | None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    grouped: dict[str, list[Any]] = {"park": [], "hotel": [], "school": [], "museum": []}
+    records: list[dict[str, Any]] = []
+    for feat in features:
+        props = feat.get("properties", {}) or {}
+        tags = props.get("tags", {}) if isinstance(props.get("tags"), dict) else {}
+        name = str(tags.get("name") or props.get("name") or tags.get("name:en") or "")
+        role = classify_feature(name)
+        if not role:
+            continue
+        try:
+            geom = shape(feat["geometry"])
+        except Exception:
+            continue
+        if geom.is_empty:
+            continue
+        if geom.geom_type in {"Point", "MultiPoint"}:
+            # Explicit proxy only. It is never treated as an exact building/site boundary.
+            geom = shp_transform(Transformer.from_crs(4326, 6677, always_xy=True).transform, geom).buffer(25)
+            geom = shp_transform(Transformer.from_crs(6677, 4326, always_xy=True).transform, geom)
+            source_role = "point_buffer_proxy_25m"
+        else:
+            source_role = "osm_geometry"
+        grouped[role].append(geom)
+        records.append({"role": role, "name": name, "sourceRole": source_role, "geometryType": geom.geom_type})
+    if official_park is not None:
+        grouped["park"] = [official_park]
+        records.append({"role": "park", "name": "横網町公園", "sourceRole": "tokyo_official_green_open_data", "geometryType": official_park.geom_type})
+    merged: dict[str, Any] = {}
+    for role, geoms in grouped.items():
+        valid = [g for g in geoms if g is not None and not g.is_empty]
+        if valid:
+            merged[role] = unary_union(valid)
+    return merged, records
+
+
+def project_geom(geom: Any, src: int = 4326, dst: int = 6677) -> Any:
+    transformer = Transformer.from_crs(src, dst, always_xy=True)
+    return shp_transform(transformer.transform, geom)
+
+
+def unproject_geom(geom: Any, src: int = 6677, dst: int = 4326) -> Any:
+    transformer = Transformer.from_crs(src, dst, always_xy=True)
+    return shp_transform(transformer.transform, geom)
+
+
+def directional_extremes(poly: Polygon, directions: int = 12) -> np.ndarray:
+    hull = poly.convex_hull
+    coords = np.asarray(hull.exterior.coords[:-1], dtype=float)
+    pts = []
+    for i in range(directions):
+        theta = 2 * math.pi * i / directions
+        vec = np.array([math.cos(theta), math.sin(theta)])
+        pts.append(coords[np.argmax(coords @ vec)])
+    return np.asarray(pts, dtype=float)
+
+
+def fit_affine(src_points: np.ndarray, dst_points: np.ndarray) -> tuple[np.ndarray, float]:
+    if src_points.shape != dst_points.shape or src_points.shape[0] < 3:
+        raise ValueError("need matching point arrays")
+    x = np.column_stack([src_points, np.ones(len(src_points))])
+    coef, *_ = np.linalg.lstsq(x, dst_points, rcond=None)
+    pred = x @ coef
+    rms = float(np.sqrt(np.mean(np.sum((pred - dst_points) ** 2, axis=1))))
+    # shapely affine_transform: [a,b,d,e,xoff,yoff]
+    a, d = coef[0, 0], coef[0, 1]
+    b, e = coef[1, 0], coef[1, 1]
+    xoff, yoff = coef[2, 0], coef[2, 1]
+    return np.array([a, b, d, e, xoff, yoff], dtype=float), rms
+
+
+def p83_parcel_consistency_audit() -> dict[str, Any]:
+    outer = Polygon(P83_OUTER_PIXELS)
+    parcels = {name: Polygon(points) for name, points in P83_A_COMPONENTS.items()}
+    total_a_pixels = sum(poly.area for poly in parcels.values())
+    large_pixels = parcels["park_block_large"].area
+    observed_ratio = large_pixels / total_a_pixels
+    published_ratio = PARK_1928_TSUBO / PARK_1922_TSUBO
+    global_scale_m2_per_pixel2 = SOURCE_AREA_M2_APPROX / outer.area
+    return {
+        "status": "manual_source_space_consistency_check",
+        "outerPixelArea": float(outer.area),
+        "globalScaleM2PerPixel2": float(global_scale_m2_per_pixel2),
+        "parcelPixelAreas": {k: float(v.area) for k, v in parcels.items()},
+        "totalAPixelArea": float(total_a_pixels),
+        "largeAObservedShare": float(observed_ratio),
+        "published1928To1922AreaShare": float(published_ratio),
+        "absoluteShareDifference": float(abs(observed_ratio - published_ratio)),
+        "relativeShareDifference": float(abs(observed_ratio / published_ratio - 1.0)),
+        "manualEstimatedAreasM2": {k: float(v.area * global_scale_m2_per_pixel2) for k, v in parcels.items()},
+        "publishedSmallACombinedM2": float(PARK_1922_M2 - PARK_1928_M2),
+        "manualSmallACombinedM2": float(
+            (parcels["small_north"].area + parcels["small_south"].area)
+            * global_scale_m2_per_pixel2
+        ),
+        "interpretation": (
+            "The large A parcel plus two small A parcels reproduces the published "
+            "1928/1922 area share extremely closely in source space.  This supports "
+            "the time-slice interpretation, but it is not independent evidence because "
