@@ -1,0 +1,51 @@
+name: Audit Tokyo archaeological API for Suzukamori
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/mlit-l03b-acquisition-20260811]
+    paths:
+      - '.github/workflows/acquire-tokyo-iseki-suzugamori-api.yml'
+      - 'research/acquire_tokyo_iseki_suzugamori_api.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/acquire-tokyo-iseki-suzugamori-api.yml'
+      - 'research/acquire_tokyo_iseki_suzugamori_api.py'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --disable-pip-version-check playwright pyproj shapely
+          python -m playwright install --with-deps chromium
+      - name: Query official search and WFS endpoints
+        continue-on-error: true
+        run: python research/acquire_tokyo_iseki_suzugamori_api.py
+      - name: Publish summary
+        if: always()
+        shell: bash
+        run: |
+          echo '## Suzukamori official archaeological API audit' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f out-tokyo-iseki-suzugamori-api/SUMMARY.json ]; then
+            cat out-tokyo-iseki-suzugamori-api/SUMMARY.json >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'SUMMARY.json was not produced' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tokyo-iseki-suzugamori-api-audit
+          path: out-tokyo-iseki-suzugamori-api
+          if-no-files-found: warn
+          retention-days: 14
