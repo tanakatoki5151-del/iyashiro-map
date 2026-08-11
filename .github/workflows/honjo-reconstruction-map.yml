@@ -1,0 +1,63 @@
+name: Honjo reconstruction map public-source probe
+
+on:
+  push:
+    branches:
+      - research/mlit-l03b-acquisition-20260811
+    paths:
+      - '.github/workflows/honjo-reconstruction-map.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Fetch Tokyo Archives Honjo reconstruction map page and public images
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p out
+          page='https://www.soumu.metro.tokyo.lg.jp/01soumu-archives/07edo_tokyo/0701syoko_kara11'
+          curl -fL --connect-timeout 15 --max-time 90 --retry 3 -A 'Mozilla/5.0 iyashiro-map research' "$page" -o out/page.html
+          python3 - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import urllib.parse, json, re
+          html=Path('out/page.html').read_text(errors='ignore')
+          base='https://www.soumu.metro.tokyo.lg.jp/01soumu-archives/07edo_tokyo/0701syoko_kara11'
+          urls=[]
+          for m in re.finditer(r'(?:src|href)=["\']([^"\']+)["\']', html, re.I):
+              u=urllib.parse.urljoin(base,m.group(1))
+              if re.search(r'\.(?:jpg|jpeg|png|gif|pdf)(?:\?|$)',u,re.I): urls.append(u)
+          urls=list(dict.fromkeys(urls))
+          Path('out/candidates.json').write_text(json.dumps(urls,ensure_ascii=False,indent=2),encoding='utf-8')
+          print('\n'.join(urls))
+          PY
+          python3 - <<'PY'
+          import json, pathlib, requests, hashlib, urllib.parse, re
+          out=pathlib.Path('out'); urls=json.loads((out/'candidates.json').read_text())
+          s=requests.Session(); s.headers.update({'User-Agent':'Mozilla/5.0 iyashiro-map research','Referer':'https://www.soumu.metro.tokyo.lg.jp/'})
+          rows=[]
+          for i,u in enumerate(urls):
+              try:
+                  r=s.get(u,timeout=60); ct=(r.headers.get('content-type') or '').lower()
+                  row={'url':u,'status':r.status_code,'contentType':ct,'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest()}
+                  if r.ok and (ct.startswith('image/') or 'pdf' in ct) and len(r.content)>20000:
+                      ext='pdf' if 'pdf' in ct else ('png' if 'png' in ct else 'jpg')
+                      fn=f'asset-{i:03d}.{ext}'; (out/fn).write_bytes(r.content); row['savedAs']=fn
+                  rows.append(row)
+              except Exception as e: rows.append({'url':u,'error':repr(e)})
+          (out/'REPORT.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2),encoding='utf-8')
+          PY
+          sha256sum out/* > out/SHA256SUMS.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: honjo-reconstruction-map
+          path: out
+          if-no-files-found: warn
+          retention-days: 14
