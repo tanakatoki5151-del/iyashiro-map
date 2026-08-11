@@ -1,0 +1,53 @@
+name: Honjo official museum panel acquisition
+
+on:
+  push:
+    branches:
+      - research/mlit-l03b-acquisition-20260811
+    paths:
+      - '.github/workflows/honjo-official-panel.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download official Memorial Museum database image and record provenance
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p out
+          page='https://tokyoireikyoukai.com/data/91'
+          img='https://tokyoireikyoukai.com/idf/2972215-00013.jpg'
+          curl -fL --retry 4 --retry-delay 2 -A 'Mozilla/5.0 iyashiro-map research' "$page" -o out/database-page.html
+          curl -fL --retry 4 --retry-delay 2 -A 'Mozilla/5.0 iyashiro-map research' -e "$page" "$img" -o out/official-museum-object-15-00013.jpg
+          file out/official-museum-object-15-00013.jpg > out/FILE.txt
+          sha256sum out/* > out/SHA256SUMS.txt
+          python3 - <<'PY'
+          from PIL import Image
+          import json, pathlib
+          p=pathlib.Path('out/official-museum-object-15-00013.jpg')
+          im=Image.open(p)
+          d={
+            'databasePage':'https://tokyoireikyoukai.com/data/91',
+            'imageUrl':'https://tokyoireikyoukai.com/idf/2972215-00013.jpg',
+            'museumObjectTitle':'被服廠跡ノ分割図',
+            'catalogueNumber':'15-00013',
+            'catalogueDate':'1932-03',
+            'pixelWidth':im.width,
+            'pixelHeight':im.height,
+            'mode':im.mode,
+            'status':'downloaded_from_official_museum_database',
+            'researchRule':'image may be used for internal research alignment; public reuse requires rights/permission review'
+          }
+          pathlib.Path('out/PROVENANCE.json').write_text(json.dumps(d,ensure_ascii=False,indent=2),encoding='utf-8')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: honjo-official-museum-panel
+          path: out
+          retention-days: 14
