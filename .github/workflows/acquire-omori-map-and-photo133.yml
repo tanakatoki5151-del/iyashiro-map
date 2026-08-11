@@ -6,6 +6,10 @@ on:
     branches: [research/mlit-l03b-acquisition-20260811]
     paths:
       - '.github/workflows/acquire-omori-map-and-photo133.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/acquire-omori-map-and-photo133.yml'
 
 permissions:
   contents: read
