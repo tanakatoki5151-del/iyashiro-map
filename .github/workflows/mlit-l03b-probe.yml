@@ -1,0 +1,36 @@
+name: MLIT L03-b probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe official catalog and candidate URLs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p out
+          curl -fL --retry 3 'https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-L03-b.html' -o out/catalog.html || true
+          python3 - <<'PY'
+          import re, pathlib
+          p=pathlib.Path('out/catalog.html')
+          s=p.read_text(errors='ignore') if p.exists() else ''
+          for x in sorted(set(re.findall(r'https?[^\"\'<> ]+|[^\"\'<> ]+L03-b[^\"\'<> ]+\.zip',s))):
+              if '5239' in x or '5339' in x: print(x)
+          PY
+          for y in 76 87 91 97; do
+            for m in 5239 5339; do
+              for u in \
+                "https://nlftp.mlit.go.jp/ksj/gml/data/L03-b/L03-b-${y}/L03-b-${y}_${m}_GML.zip" \
+                "https://nlftp.mlit.go.jp/ksj/gml/data/L03-b/L03-b-${y}/L03-b-${y}_${m}.zip"; do
+                echo "$u" >> out/probe.txt
+                curl -IL --max-time 30 "$u" >> out/probe.txt 2>&1 || true
+              done
+            done
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mlit-l03b-probe
+          path: out
