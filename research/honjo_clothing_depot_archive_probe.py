@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Reproducible acquisition of the official 1932 Honjo clothing-depot archive.
 from pathlib import Path
 import hashlib,json,re,zipfile,requests
 from bs4 import BeautifulSoup
@@ -24,7 +25,6 @@ for i,x in enumerate(links):
   report.append(rec)
  except Exception as e: report.append({'text':x['text'],'url':x['url'],'error':repr(e)})
 (out/'download-report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
-# Emit a shortlist of likely chapter-8 / plan / site-history files from archives.
 short=[]
 for zp in out.glob('download-*.zip'):
  with zipfile.ZipFile(zp) as z:
