@@ -1,0 +1,63 @@
+name: Acquire Honjo Clothing Depot source evidence
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/honjo-clothing-depot-boundary-20260811]
+    paths:
+      - '.github/workflows/acquire-honjo-clothing-depot-sources.yml'
+      - 'research/acquire_honjo_clothing_depot_sources.py'
+
+permissions:
+  contents: write
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/honjo-clothing-depot-boundary-20260811
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Playwright
+        run: |
+          python -m pip install --disable-pip-version-check playwright
+          python -m playwright install --with-deps chromium
+      - name: Acquire public evidence
+        continue-on-error: true
+        run: python research/acquire_honjo_clothing_depot_sources.py
+      - name: Package
+        if: always()
+        run: |
+          python - <<'PY'
+          import pathlib,zipfile
+          root=pathlib.Path('out-honjo-clothing-depot-sources');out=pathlib.Path('honjo-clothing-depot-source-evidence-v1.zip')
+          with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
+            if root.exists():
+              for p in sorted(root.rglob('*')):
+                if p.is_file():z.write(p,p.relative_to(root.parent))
+          PY
+          sha256sum honjo-clothing-depot-source-evidence-v1.zip > honjo-clothing-depot-source-evidence-v1.zip.sha256
+      - name: Publish durable research release
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag='research-honjo-clothing-depot-20260811'
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --title 'Research source pack: Honjo Clothing Depot 2026-08-11' --notes 'Research only. Facility extent, mass-death area, memorial locations and current park remain separate.' --target research/honjo-clothing-depot-boundary-20260811
+          fi
+          gh release upload "$tag" honjo-clothing-depot-source-evidence-v1.zip honjo-clothing-depot-source-evidence-v1.zip.sha256 --clobber
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: honjo-clothing-depot-source-evidence-v1
+          path: |
+            honjo-clothing-depot-source-evidence-v1.zip
+            honjo-clothing-depot-source-evidence-v1.zip.sha256
+            out-honjo-clothing-depot-sources/SUMMARY.json
+          if-no-files-found: warn
+          retention-days: 14
