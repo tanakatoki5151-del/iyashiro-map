@@ -19,24 +19,22 @@ permissions:
 jobs:
   acquire:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install browser dependencies
-        run: |
-          python -m pip install --disable-pip-version-check playwright
-          python -m playwright install --with-deps chromium
-      - name: Capture official public map evidence
+      - name: Install GIS acquisition dependencies
+        run: python -m pip install --disable-pip-version-check requests pyproj shapely
+      - name: Acquire official search, detail and WFS geometry
         continue-on-error: true
         run: python research/acquire_tokyo_iseki_kozuka.py
       - name: Publish summary
         if: always()
         shell: bash
         run: |
-          echo '## Tokyo archaeological-map Kozukappara probe' >> "$GITHUB_STEP_SUMMARY"
+          echo '## Tokyo archaeological-map Kozukappara API acquisition' >> "$GITHUB_STEP_SUMMARY"
           if [ -f out-tokyo-iseki-kozuka/SUMMARY.json ]; then
             cat out-tokyo-iseki-kozuka/SUMMARY.json >> "$GITHUB_STEP_SUMMARY"
           else
@@ -45,7 +43,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: tokyo-iseki-kozukappara-probe
+          name: tokyo-iseki-kozukappara-api
           path: out-tokyo-iseki-kozuka
           if-no-files-found: warn
           retention-days: 14
