@@ -1,0 +1,51 @@
+name: Acquire NDL Tokyo 1:5000 Asakusa map
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/mlit-l03b-acquisition-20260811]
+    paths:
+      - '.github/workflows/acquire-ndl-tokyo-5000-asakusa.yml'
+      - 'research/acquire_ndl_tokyo_5000_asakusa.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/acquire-ndl-tokyo-5000-asakusa.yml'
+      - 'research/acquire_ndl_tokyo_5000_asakusa.py'
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Playwright
+        run: |
+          python -m pip install --disable-pip-version-check playwright
+          python -m playwright install --with-deps chromium
+      - name: Acquire NDL public map resources
+        continue-on-error: true
+        run: python research/acquire_ndl_tokyo_5000_asakusa.py
+      - name: Publish summary
+        if: always()
+        shell: bash
+        run: |
+          echo '## NDL Tokyo 1:5,000 map acquisition' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f out-ndl-tokyo-5000-asakusa/SUMMARY.json ]; then
+            cat out-ndl-tokyo-5000-asakusa/SUMMARY.json >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'SUMMARY.json not produced' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ndl-tokyo-5000-asakusa
+          path: out-ndl-tokyo-5000-asakusa
+          if-no-files-found: warn
+          retention-days: 14
