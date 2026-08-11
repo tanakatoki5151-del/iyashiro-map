@@ -5,6 +5,10 @@ on:
     branches: [research/mlit-l03b-acquisition-20260811]
     paths:
       - '.github/workflows/awm-omori-pow-image.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/awm-omori-pow-image.yml'
 permissions:
   contents: read
 jobs:
