@@ -1,0 +1,28 @@
+name: Acquire AWM Omori POW image
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/mlit-l03b-acquisition-20260811]
+    paths:
+      - '.github/workflows/awm-omori-pow-image.yml'
+permissions:
+  contents: read
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download public-domain AWM P00444.107
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p out
+          u='https://s3-ap-southeast-2.amazonaws.com/awm-media/collection/P00444.107/screen/3962790.JPG'
+          curl -fL --retry 3 "$u" -o out/P00444.107_omori_pow_1945_lowres.jpg
+          file out/P00444.107_omori_pow_1945_lowres.jpg | tee out/FILE.txt
+          sha256sum out/P00444.107_omori_pow_1945_lowres.jpg > out/SHA256SUMS.txt
+          printf '%s\n' 'Source: Australian War Memorial P00444.107' 'Date: 1945-08-25' 'Copyright: Public Domain' "$u" > out/PROVENANCE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: awm-omori-pow-P00444-107
+          path: out
+          retention-days: 14
