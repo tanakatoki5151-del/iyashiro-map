@@ -12,18 +12,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Download five official combined GIS ZIPs
+      - name: Download nine official combined GIS ZIPs covering V10 bounds
         shell: bash
         run: |
           set -euxo pipefail
           mkdir -p out/zips
-          for m in 533946 533926 533944 533924 533904; do
+          for m in 533946 533926 533944 533924 533904 533942 533922 533902 523964; do
             u="https://nlftp.mlit.go.jp/kokjo/inspect/landclassification/land/land_history_2011/mapdata/${m}/${m}_gisdata.zip"
             curl -fL --retry 3 "$u" -o "out/zips/${m}_gisdata.zip"
             unzip -t "out/zips/${m}_gisdata.zip" >/dev/null
           done
           sha256sum out/zips/*.zip > out/SHA256SUMS.txt
-          for z in out/zips/*.zip; do echo "### $(basename "$z")"; unzip -l "$z" | grep -Ei 'disaster|saigai|flood|landslide|LN|PL' | head -100 || true; done | tee out/MEMBER-HINTS.txt
+          for z in out/zips/*.zip; do echo "### $(basename "$z")"; unzip -l "$z" | head -150; done | tee out/MEMBERS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: mlit-land-history-combined-gis
