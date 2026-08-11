@@ -1,0 +1,57 @@
+name: MLIT land-history GIS probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research/mlit-l03b-acquisition-20260811
+    paths:
+      - '.github/workflows/mlit-land-history-probe.yml'
+      - 'research/mlit_land_history_probe.py'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/mlit-land-history-probe.yml'
+      - 'research/mlit_land_history_probe.py'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install probe dependencies
+        run: python -m pip install --disable-pip-version-check requests beautifulsoup4
+      - name: Probe and download official land-history GIS ZIPs
+        continue-on-error: true
+        run: python research/mlit_land_history_probe.py
+      - name: Publish summary
+        if: always()
+        shell: bash
+        run: |
+          echo '## MLIT Land History Survey GIS probe' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f out-land-history/STATUS.txt ]; then
+            cat out-land-history/STATUS.txt | sed 's/^/- /' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '- STATUS.txt was not produced' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f out-land-history/SHA256SUMS.txt ]; then
+            echo '### Checksums' >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            cat out-land-history/SHA256SUMS.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mlit-land-history-gis-probe
+          path: out-land-history
+          if-no-files-found: warn
+          retention-days: 14
