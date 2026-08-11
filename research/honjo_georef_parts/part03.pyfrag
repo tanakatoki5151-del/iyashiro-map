@@ -1,0 +1,193 @@
+def make_qc(modern: dict[str, Any], geojson_features: list[dict[str, Any]], p83_upright: Path) -> None:
+    # Source-space linework QC
+    fig, ax = plt.subplots(figsize=(14, 8))
+    ax.imshow(Image.open(p83_upright))
+    pts = np.asarray(P83_OUTER_PIXELS)
+    ax.plot(pts[:, 0], pts[:, 1], linewidth=2.5, label="digitised outer line")
+    ax.scatter(pts[::4, 0], pts[::4, 1], s=18)
+    for name, coords in P83_A_COMPONENTS.items():
+        arr = np.asarray(coords)
+        ax.plot(arr[:, 0], arr[:, 1], linewidth=2, label=f"A parcel: {name}")
+    for label, (x, y) in P83_LABEL_POINTS.items():
+        ax.annotate(label, (x, y), fontsize=6)
+    ax.set_title("1932 p83 source-space digitisation and A-parcel consistency check")
+    ax.axis("off")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(QC / "01-p83-source-space-qc.png", dpi=180)
+    plt.close(fig)
+
+    # Modern geometries + derived constraints
+    if not geojson_features:
+        (QC / "02-modern-constraint-and-fit-qc.txt").write_text(
+            "No modern/derived geometry was available; process failed closed.\n", encoding="utf-8"
+        )
+        return
+    gdf = gpd.GeoDataFrame.from_features(geojson_features, crs=4326).to_crs(6677)
+    fig, ax = plt.subplots(figsize=(10, 10))
+    for role, sub in gdf.groupby(gdf["featureRole"].astype(str)):
+        sub.boundary.plot(ax=ax, linewidth=2, label=role)
+    ax.set_aspect("equal")
+    ax.set_title("Honjo modern references and research-only constraints")
+    ax.legend(fontsize=7, loc="best")
+    fig.tight_layout()
+    fig.savefig(QC / "02-modern-constraint-and-fit-qc.png", dpi=180)
+    plt.close(fig)
+
+
+def write_csv_records(path: Path, records: list[dict[str, Any]]) -> None:
+    fields = sorted({k for row in records for k in row})
+    with path.open("w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(records)
+
+
+def main() -> int:
+    source_records: list[SourceRecord] = []
+    for source_id, filename, minimum in [
+        ("p83_drive", "p83-original.png", 100_000),
+        ("official_2020_design_evolution", "official-2020-design-evolution.jpg", 10_000),
+        ("official_2020_honjo_storehouse", "official-2020-honjo-storehouse.jpg", 10_000),
+        ("official_park_map_pdf", "official-current-park-map.pdf", 100_000),
+        ("secondary_exhibit_panel", "secondary-official-exhibit-panel-photo.jpg", 10_000),
+    ]:
+        source_records.append(download(source_id, SOURCES[source_id], filename, min_bytes=minimum))
+
+    p83_rec = next(r for r in source_records if r.source_id == "p83_drive")
+    if p83_rec.status != "downloaded" or not p83_rec.path:
+        safe_json(OUT / "AUDIT.json", {"status": "failed_closed", "reason": "official p83 image unavailable", "sources": [r.__dict__ for r in source_records]})
+        return 0
+
+    park_pdf_rec = next(r for r in source_records if r.source_id == "official_park_map_pdf")
+    if park_pdf_rec.status == "downloaded" and park_pdf_rec.path:
+        try:
+            render_pdf_first_page(OUT / park_pdf_rec.path, DERIVED / "official-current-park-map.png")
+        except Exception as exc:  # noqa: BLE001
+            park_pdf_rec.note = f"render failed: {exc}"
+
+    p83_upright, _ = normalise_p83(OUT / p83_rec.path)
+    safe_json(DERIVED / "p83-source-space-linework.json", {
+        "source": "1932 『被服廠跡』 p83 元陸軍被服廠分割図",
+        "rotation": "+90 degrees counter-clockwise",
+        "outerPixelCoordinates": P83_OUTER_PIXELS,
+        "aParcelPixelCoordinates": P83_A_COMPONENTS,
+        "labelPoints": P83_LABEL_POINTS,
+        "parcelConsistencyAudit": p83_parcel_consistency_audit(),
+        "legend": LEGEND,
+        "status": "source_space_digitisation_not_georeferenced",
+        "scoringEffect": "none",
+    })
+
+    official_park, park_report = find_tokyo_park_geometry()
+    safe_json(OUT / "tokyo-park-geometry-audit.json", park_report)
+    osm_features, osm_report = overpass_features()
+    safe_json(OUT / "overpass-audit.json", osm_report)
+    modern, modern_records = extract_modern_geometries(osm_features, official_park)
+    write_csv_records(OUT / "modern-feature-register.csv", modern_records)
+
+    geojson_features, fit_audit = build_constraint_and_fit(modern)
+    result_geojson = {
+        "type": "FeatureCollection",
+        "name": "honjo_clothing_depot_research_constraints_v1",
+        "features": geojson_features,
+        "metadata": {
+            "status": fit_audit.get("status"),
+            "scoringEffect": "none",
+            "verifiedHistoricalSitePolygonCountEffect": 0,
+            "sourceBackedReviewPolygonCountEffect": 0,
+            "doNotAutoExclude": True,
+            "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        },
+    }
+    safe_json(DERIVED / "honjo-research-constraints-v1.geojson", result_geojson)
+    make_qc(modern, geojson_features, p83_upright)
+
+    audit = {
+        "datasetId": "honjo-clothing-depot-georef-research-v1-20260812",
+        "status": fit_audit.get("status"),
+        "sourceArea": {
+            "formerDepotTsuboApprox": SOURCE_AREA_TSUBO_APPROX,
+            "formerDepotM2Approx": SOURCE_AREA_M2_APPROX,
+            "park1922Tsubo": PARK_1922_TSUBO,
+            "park1922M2": PARK_1922_M2,
+            "park1928Tsubo": PARK_1928_TSUBO,
+            "park1928M2": PARK_1928_M2,
+            "currentParkOfficialM2": CURRENT_PARK_OFFICIAL_M2,
+        },
+        "p83Legend": LEGEND,
+        "sources": [r.__dict__ for r in source_records],
+        "tokyoParkGeometry": park_report,
+        "overpass": osm_report,
+        "modernFeatureRegister": modern_records,
+        "fit": fit_audit,
+        "qualityGate": {
+            "scoringEffect": "none",
+            "verifiedHistoricalSitePolygonCountEffect": 0,
+            "sourceBackedReviewPolygonCountEffect": 0,
+            "doNotAutoExclude": True,
+            "doNotApplyDistancePenalty": True,
+            "doNotChangeRanking": True,
+            "notProbability": True,
+            "notHistoricalBoundary": True,
+        },
+    }
+    safe_json(OUT / "AUDIT.json", audit)
+
+    readme = f"""# 本所被服廠 p83 現代座標化・研究パック v1
+
+生成日: {time.strftime('%Y-%m-%d', time.gmtime())}
+
+## 到達点
+
+- 1932年『被服廠跡』p83「元陸軍被服廠分割図」を取得し、90度回転後の画像座標で外周線を明示的にデジタイズした。
+- 凡例は A=公園用地、B=社会事業用地、C=道路用地、D=逓信省用地、E=学校用地、F=電気局用地として保存した。
+- 東京都「緑のオープンデータ」から横網町公園候補を探索し、OSM/Overpassから第一ホテル両国、両国中学校、江戸東京博物館等の現代Geometryを取得した。
+- p83のA区画を大区画＋北側小区画＋南側小区画としてソース画像上で分離し、大A/全Aの画素面積比と公表された1928/1922面積比を整合監査した。これは既知面積を使った内部QCであり、独立証拠ではない。
+- 大A区画を現横網町公園Polygonへ方向別支持点で合わせ、同一変換を旧被服廠外周へ適用した探索的shape alignmentを生成した。コントロールポイントを使う地理補正ではない。
+- 現代施設をまとめた `modern_feature_constraint_envelope` を、公式展示記述の空間クロスチェック用に生成した。
+
+## 厳格な注意
+
+この成果物は地理補正の準備・候補比較用であり、歴史的敷地の確定Polygonではない。現代施設の凸包は旧敷地境界ではなく、公式展示の「現在の公園・ホテル・学校・博物館の一部を含む」という記述を空間的に点検する外側制約にすぎない。affine fitも地物コントロールポイントではなく方向別外形支持点による形状合わせである。
+
+- `scoringEffect = none`
+- `verifiedHistoricalSitePolygonCountEffect = 0`
+- `sourceBackedReviewPolygonCountEffect = 0`
+- 自動除外・距離減点・ランキング変更は禁止
+
+## 次の昇格ゲート
+
+1. 1932年p83上の交差点・道路屈曲・区画角を、別系統の旧版地図または区画整理図へ対応させる。
+2. 現代施設のうち「江戸東京博物館の一部」の正確な範囲を、従前図・公図・区画整理換地図で確定する。
+3. 少なくとも6点の独立コントロールポイントで変換し、残差を保存する。
+4. 別担当が頂点と根拠をレビューする。
+
+## 主な成果物
+
+- `raw/`: 取得した原資料と取得証拠
+- `derived/p83-source-space-linework.json`: p83画像座標の外周線
+- `derived/honjo-research-constraints-v1.geojson`: 現代参照Geometry・外側制約・探索的shape fit
+- `AUDIT.json`: 面積・残差・品質ゲート
+- `qc/`: 画像座標および現代座標のQC図
+"""
+    (OUT / "README.md").write_text(readme, encoding="utf-8")
+
+    checksums = []
+    for path in sorted(OUT.rglob("*")):
+        if path.is_file() and path.name != "SHA256SUMS.txt":
+            checksums.append(f"{sha256_file(path)}  {path.relative_to(OUT).as_posix()}")
+    (OUT / "SHA256SUMS.txt").write_text("\n".join(checksums) + "\n", encoding="utf-8")
+
+    print(json.dumps({
+        "status": audit["status"],
+        "modernRoles": sorted(modern),
+        "geojsonFeatures": len(geojson_features),
+        "output": str(OUT),
+        "qualityGate": audit["qualityGate"],
+    }, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
