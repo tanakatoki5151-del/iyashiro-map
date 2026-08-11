@@ -1,0 +1,49 @@
+name: Acquire Omori map and GSI photo 133
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/mlit-l03b-acquisition-20260811]
+    paths:
+      - '.github/workflows/acquire-omori-map-and-photo133.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Acquire source images and metadata
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p out
+          map_url='https://thetokyofiles.wordpress.com/wp-content/uploads/2016/01/tokyo-pow-prisoner-of-war-map-1948.jpg'
+          api_url='https://service.gsi.go.jp/map-photos/app/api/photo/11025'
+          photo_url='https://service.gsi.go.jp/map-photos/contents/screen/mapphoto/img/aerialphotograph/%E7%A9%BA%E4%B8%AD%E5%86%99%E7%9C%9F/USA/standard/M58-A-6/USA-M58-A-6-133.jpg'
+          curl -fL --retry 3 "$map_url" -o out/US_Army_1948_possible_POW_camp_map.jpg
+          curl -fL --retry 3 "$api_url" -o out/GSI_photo_11025_metadata.json
+          curl -fL --retry 3 "$photo_url" -o out/USA-M58-A-6-133_400dpi.jpg
+          file out/* | tee out/FILE.txt
+          sha256sum out/* > out/SHA256SUMS.txt
+          python - <<'PY'
+          from PIL import Image
+          import json, pathlib
+          result={}
+          for p in pathlib.Path('out').glob('*.jpg'):
+              im=Image.open(p)
+              result[p.name]={'width':im.width,'height':im.height,'mode':im.mode,'bytes':p.stat().st_size}
+          pathlib.Path('out/IMAGE-METADATA.json').write_text(json.dumps(result,indent=2),encoding='utf-8')
+          PY
+          cat > out/PROVENANCE.txt <<'EOF'
+          US Army map image source: the Tokyo Files WordPress media; described by the host page as a 1948 US Army map using 1945 data and labeling the site “Possible Prisoner of War Camp”. This is a secondary-hosted copy until the original map series/sheet is identified.
+          GSI photo source: Geospatial Information Authority of Japan, photo ID 11025, course USA M58-A-6, photo 133.
+          All acquired files remain research-review-only and do not change scoring.
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omori-map-and-gsi-photo133
+          path: out
+          retention-days: 14
