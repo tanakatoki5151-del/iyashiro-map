@@ -1,0 +1,95 @@
+# Fallback and stricter context gate, inserted after the core functions.
+_PRIMARY_OVERPASS_FEATURES = overpass_features
+_PRIMARY_BUILD_CONSTRAINT_AND_FIT = build_constraint_and_fit
+
+
+def overpass_features() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    features, report = _PRIMARY_OVERPASS_FEATURES()
+    found = set()
+    for feat in features:
+        props = feat.get("properties", {}) or {}
+        tags = props.get("tags", {}) if isinstance(props.get("tags"), dict) else {}
+        role = classify_feature(str(tags.get("name") or props.get("name") or tags.get("name:en") or ""))
+        if role:
+            found.add(role)
+
+    missing = [r for r in ("hotel", "school", "museum") if r not in found]
+    if not missing:
+        return features, report
+
+    queries = {
+        "hotel": "第一ホテル両国 東京都墨田区",
+        "school": "墨田区立両国中学校",
+        "museum": "江戸東京博物館",
+    }
+    fallback_records = []
+    fallback_features = []
+    for role in missing:
+        q = queries[role]
+        try:
+            response = SESSION.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={"q": q, "format": "jsonv2", "polygon_geojson": 1, "limit": 5, "countrycodes": "jp"},
+                timeout=(30, 120),
+            )
+            response.raise_for_status()
+            rows = response.json()
+            chosen = None
+            for row in rows:
+                if row.get("geojson"):
+                    chosen = row
+                    if row.get("type") in {"hotel", "school", "museum", "attraction", "building"}:
+                        break
+            if chosen and chosen.get("geojson"):
+                feature = {
+                    "type": "Feature",
+                    "geometry": chosen["geojson"],
+                    "properties": {
+                        "name": {"hotel": "第一ホテル両国", "school": "両国中学校", "museum": "江戸東京博物館"}[role],
+                        "source": "OpenStreetMap Nominatim one-off fallback",
+                        "osm_type": chosen.get("osm_type"),
+                        "osm_id": chosen.get("osm_id"),
+                        "display_name": chosen.get("display_name"),
+                    },
+                }
+                fallback_features.append(feature)
+                fallback_records.append({"role": role, "status": "selected", "result": chosen})
+            else:
+                fallback_records.append({"role": role, "status": "not_found", "results": rows})
+        except Exception as exc:  # noqa: BLE001
+            fallback_records.append({"role": role, "status": "failed", "error": f"{type(exc).__name__}: {exc}"})
+        time.sleep(1.1)
+
+    safe_json(RAW / "nominatim-modern-feature-fallback.json", fallback_records)
+    merged = features + fallback_features
+    report = dict(report)
+    report["nominatimFallback"] = fallback_records
+    report["fallbackFeatureCount"] = len(fallback_features)
+    report["status"] = "overpass_plus_nominatim" if features else "nominatim_fallback"
+    report["feature_count"] = len(merged)
+    return merged, report
+
+
+def build_constraint_and_fit(modern: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    features, audit = _PRIMARY_BUILD_CONSTRAINT_AND_FIT(modern)
+    roles = set(audit.get("modernFeatureRolesFound", []))
+    nonpark_roles = roles.intersection({"hotel", "school", "museum"})
+    context_complete = "park" in roles and len(nonpark_roles) >= 2
+    audit["modernContextCompleteness"] = {
+        "required": "park plus at least two of hotel/school/museum",
+        "roles": sorted(roles),
+        "nonParkRoleCount": len(nonpark_roles),
+        "passed": context_complete,
+    }
+    if not context_complete:
+        audit["status"] = "research_shape_alignment_partial_context"
+        audit.setdefault("candidateGate", {})["modernContext"] = False
+        audit.setdefault("promotionBlockedBy", []).append("at least two adjacent modern feature geometries")
+        for feature in features:
+            props = feature.setdefault("properties", {})
+            if props.get("status") == "research_shape_alignment_candidate_v0":
+                props["status"] = "research_shape_alignment_partial_context"
+                props["contextIncomplete"] = True
+    return features, audit
+
+
