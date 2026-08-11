@@ -22,23 +22,29 @@ jobs:
       - name: Acquire source images and metadata
         shell: bash
         run: |
-          set -euxo pipefail
+          set -uox pipefail
           mkdir -p out
+          python -m pip install --disable-pip-version-check pillow
           map_url='https://thetokyofiles.wordpress.com/wp-content/uploads/2016/01/tokyo-pow-prisoner-of-war-map-1948.jpg'
+          page_url='https://service.gsi.go.jp/map-photos/app/map?search=photo&id=11025&search_date_from=0000&search_date_to=9999'
           api_url='https://service.gsi.go.jp/map-photos/app/api/photo/11025'
           photo_url='https://service.gsi.go.jp/map-photos/contents/screen/mapphoto/img/aerialphotograph/%E7%A9%BA%E4%B8%AD%E5%86%99%E7%9C%9F/USA/standard/M58-A-6/USA-M58-A-6-133.jpg'
-          curl -fL --retry 3 "$map_url" -o out/US_Army_1948_possible_POW_camp_map.jpg
-          curl -fL --retry 3 "$api_url" -o out/GSI_photo_11025_metadata.json
-          curl -fL --retry 3 "$photo_url" -o out/USA-M58-A-6-133_400dpi.jpg
-          file out/* | tee out/FILE.txt
-          sha256sum out/* > out/SHA256SUMS.txt
+          curl -fL --retry 3 -A 'Mozilla/5.0' "$map_url" -o out/US_Army_1948_possible_POW_camp_map.jpg || echo 'map download failed' >> out/ERRORS.txt
+          curl -fL --retry 3 -A 'Mozilla/5.0' -e "$page_url" "$page_url" -o out/GSI_photo_11025_page.html || echo 'GSI page failed' >> out/ERRORS.txt
+          curl -fL --retry 3 -A 'Mozilla/5.0' -e "$page_url" "$api_url" -o out/GSI_photo_11025_metadata.json || echo 'GSI API failed' >> out/ERRORS.txt
+          curl -fL --retry 3 -A 'Mozilla/5.0' -e "$page_url" "$photo_url" -o out/USA-M58-A-6-133_400dpi.jpg || echo 'GSI photo failed' >> out/ERRORS.txt
+          file out/* | tee out/FILE.txt || true
+          sha256sum out/* > out/SHA256SUMS.txt || true
           python - <<'PY'
           from PIL import Image
           import json, pathlib
           result={}
           for p in pathlib.Path('out').glob('*.jpg'):
-              im=Image.open(p)
-              result[p.name]={'width':im.width,'height':im.height,'mode':im.mode,'bytes':p.stat().st_size}
+              try:
+                  im=Image.open(p)
+                  result[p.name]={'width':im.width,'height':im.height,'mode':im.mode,'bytes':p.stat().st_size}
+              except Exception as exc:
+                  result[p.name]={'error':str(exc),'bytes':p.stat().st_size}
           pathlib.Path('out/IMAGE-METADATA.json').write_text(json.dumps(result,indent=2),encoding='utf-8')
           PY
           cat > out/PROVENANCE.txt <<'EOF'
@@ -47,6 +53,7 @@ jobs:
           All acquired files remain research-review-only and do not change scoring.
           EOF
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: omori-map-and-gsi-photo133
           path: out
