@@ -1,0 +1,210 @@
+            "published areas informed digitisation QC."
+        ),
+        "notIndependentEvidence": True,
+        "digitisationQualityControlledAgainstPublishedAreaRatio": True,
+        "scoringEffect": "none",
+    }
+
+
+def best_directional_affine_fit(src_poly: Polygon, dst_poly: Polygon, directions: int = 16) -> dict[str, Any]:
+    src = directional_extremes(src_poly, directions)
+    dst_base = directional_extremes(dst_poly, directions)
+    best: dict[str, Any] | None = None
+    for reversed_order in (False, True):
+        dst0 = dst_base[::-1] if reversed_order else dst_base
+        for shift in range(directions):
+            dst = np.roll(dst0, shift, axis=0)
+            try:
+                matrix, rms = fit_affine(src, dst)
+                transformed = affinity.affine_transform(src_poly, matrix.tolist())
+                union_area = transformed.union(dst_poly).area
+                iou = float(transformed.intersection(dst_poly).area / union_area) if union_area else 0.0
+                hausdorff = float(transformed.hausdorff_distance(dst_poly))
+                objective = float(rms + hausdorff * 0.25 + (1.0 - iou) * 100.0)
+                cand = {
+                    "matrix": matrix,
+                    "rms": float(rms),
+                    "hausdorff": hausdorff,
+                    "iou": iou,
+                    "objective": objective,
+                    "shift": shift,
+                    "reversed": reversed_order,
+                    "transformed": transformed,
+                }
+                if best is None or cand["objective"] < best["objective"]:
+                    best = cand
+            except Exception:
+                continue
+    if best is None:
+        raise RuntimeError("no affine candidate could be fitted")
+    return best
+
+
+def build_constraint_and_fit(modern: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    parcel_audit = p83_parcel_consistency_audit()
+    audit: dict[str, Any] = {
+        "status": "constraint_only",
+        "scoringEffect": "none",
+        "verifiedHistoricalSitePolygonCountEffect": 0,
+        "sourceBackedReviewPolygonCountEffect": 0,
+        "doNotAutoExclude": True,
+        "doNotApplyDistancePenalty": True,
+        "doNotChangeRanking": True,
+        "notProbability": True,
+        "notHistoricalBoundary": True,
+        "parcelConsistency": parcel_audit,
+    }
+    features_out: list[dict[str, Any]] = []
+    projected = {k: project_geom(v) for k, v in modern.items()}
+    for role, geom in modern.items():
+        area = float(projected[role].area)
+        features_out.append({
+            "type": "Feature",
+            "geometry": mapping(geom),
+            "properties": {
+                "featureRole": f"current_{role}",
+                "status": "modern_reference_geometry",
+                "areaM2": area,
+                "scoringEffect": "none",
+            },
+        })
+
+    required = [r for r in ("park", "hotel", "school", "museum") if r in projected]
+    audit["modernFeatureRolesFound"] = required
+    if "park" not in projected:
+        audit["status"] = "insufficient_modern_geometry"
+        audit["promotionBlockedBy"] = ["current park polygon"]
+        return features_out, audit
+
+    # Modern context envelope.  It is a cross-check only and is not a historical boundary.
+    component_geoms = [projected[r] for r in required]
+    full_hull = unary_union(component_geoms).convex_hull
+    core_roles = [r for r in ("park", "hotel", "school") if r in projected]
+    core_union = unary_union([projected[r] for r in core_roles])
+    features_out.extend([
+        {
+            "type": "Feature",
+            "geometry": mapping(unproject_geom(core_union)),
+            "properties": {
+                "featureRole": "modern_core_union",
+                "status": "modern_reference_union",
+                "sourceRoles": core_roles,
+                "areaM2": float(core_union.area),
+                "scoringEffect": "none",
+            },
+        },
+        {
+            "type": "Feature",
+            "geometry": mapping(unproject_geom(full_hull)),
+            "properties": {
+                "featureRole": "modern_feature_constraint_envelope",
+                "status": "outer_constraint_not_historical_boundary",
+                "sourceRoles": required,
+                "areaM2": float(full_hull.area),
+                "targetHistoricalAreaApproxM2": SOURCE_AREA_M2_APPROX,
+                "areaRatioToHistoricalApprox": float(full_hull.area / SOURCE_AREA_M2_APPROX),
+                "scoringEffect": "none",
+                "notHistoricalBoundary": True,
+            },
+        },
+    ])
+    audit["modernCoreAreaM2"] = float(core_union.area)
+    audit["modernConstraintEnvelopeAreaM2"] = float(full_hull.area)
+    audit["historicalAreaApproxM2"] = SOURCE_AREA_M2_APPROX
+    audit["constraintAreaRatio"] = float(full_hull.area / SOURCE_AREA_M2_APPROX)
+
+    # Shape alignment of the p83 large A parcel to the current park polygon.
+    # This is stronger than fitting the full outer line to a modern hull because the
+    # published 1928 exchange area is nearly identical to the current official park area.
+    # It is still not a control-point georeference.
+    source_large_a = Polygon([(x, -y) for x, y in P83_A_COMPONENTS["park_block_large"]])
+    source_outer = Polygon([(x, -y) for x, y in P83_OUTER_PIXELS])
+    park_target = projected["park"].convex_hull
+    try:
+        fit = best_directional_affine_fit(source_large_a, park_target, directions=16)
+        matrix = fit["matrix"]
+        transformed_large = fit["transformed"]
+        transformed_outer = affinity.affine_transform(source_outer, matrix.tolist())
+        transformed_small = {
+            name: affinity.affine_transform(
+                Polygon([(x, -y) for x, y in points]), matrix.tolist()
+            )
+            for name, points in P83_A_COMPONENTS.items()
+            if name != "park_block_large"
+        }
+        outer_area_ratio = float(transformed_outer.area / SOURCE_AREA_M2_APPROX)
+        park_area_ratio = float(transformed_large.area / CURRENT_PARK_OFFICIAL_M2)
+        feature_coverage: dict[str, float] = {}
+        for role, geom in projected.items():
+            if geom.area:
+                feature_coverage[role] = float(transformed_outer.intersection(geom).area / geom.area)
+
+        parcel_ratio_ok = parcel_audit["relativeShareDifference"] <= 0.01
+        park_fit_ok = fit["iou"] >= 0.55 and fit["hausdorff"] <= 120
+        outer_area_ok = 0.70 <= outer_area_ratio <= 1.30
+        contextual_ok = feature_coverage.get("park", 0.0) >= 0.75
+        candidate_ok = parcel_ratio_ok and park_fit_ok and outer_area_ok and contextual_ok
+        status = "research_shape_alignment_candidate_v0" if candidate_ok else "research_shape_alignment_rejected"
+
+        audit.update({
+            "status": status,
+            "alignmentMethodClass": "shape_alignment_not_control_point_georeference",
+            "alignmentTarget": "p83 large A parcel to current park polygon",
+            "directionalSupportCount": 16,
+            "directionalShift": int(fit["shift"]),
+            "directionalOrderReversed": bool(fit["reversed"]),
+            "shapeFitRmsM": float(fit["rms"]),
+            "shapeFitHausdorffM": float(fit["hausdorff"]),
+            "shapeFitIoU": float(fit["iou"]),
+            "transformedLargeAAreaM2": float(transformed_large.area),
+            "transformedLargeAToOfficialParkAreaRatio": park_area_ratio,
+            "transformedOuterAreaM2": float(transformed_outer.area),
+            "transformedOuterToPublishedFormerDepotAreaRatio": outer_area_ratio,
+            "modernFeatureCoverageByTransformedOuter": feature_coverage,
+            "affineMatrixShapely": matrix.tolist(),
+            "candidateGate": {
+                "parcelRatioConsistency": parcel_ratio_ok,
+                "parkShapeFit": park_fit_ok,
+                "outerArea": outer_area_ok,
+                "modernContext": contextual_ok,
+            },
+            "shapeFitWarning": (
+                "The transform uses directional shape supports, not identified historical/modern "
+                "control points.  It cannot be promoted to a historical boundary."
+            ),
+        })
+        audit["promotionBlockedBy"] = [
+            "six or more independent historical-to-modern control points",
+            "pre-redevelopment road and parcel map",
+            "confirmation of the exact museum portion and 1928 exchange vertices",
+            "independent vertex and residual review",
+        ]
+        for role, geom in [
+            ("p83_large_A_shape_alignment_v0", transformed_large),
+            ("p83_former_depot_outer_shape_alignment_v0", transformed_outer),
+            *[(f"p83_{name}_shape_alignment_v0", geom) for name, geom in transformed_small.items()],
+        ]:
+            features_out.append({
+                "type": "Feature",
+                "geometry": mapping(unproject_geom(geom)),
+                "properties": {
+                    "featureRole": role,
+                    "status": status,
+                    "alignmentMethodClass": "shape_alignment_not_control_point_georeference",
+                    "scoringEffect": "none",
+                    "verifiedHistoricalSitePolygonCountEffect": 0,
+                    "sourceBackedReviewPolygonCountEffect": 0,
+                    "doNotAutoExclude": True,
+                    "doNotApplyDistancePenalty": True,
+                    "doNotChangeRanking": True,
+                    "notHistoricalBoundary": True,
+                },
+            })
+    except Exception as exc:  # noqa: BLE001
+        audit["status"] = "shape_alignment_failed_closed"
+        audit["shapeAlignmentError"] = f"{type(exc).__name__}: {exc}"
+        audit["promotionBlockedBy"] = ["successful reproducible shape alignment", "historical control points"]
+
+    return features_out, audit
+
+
