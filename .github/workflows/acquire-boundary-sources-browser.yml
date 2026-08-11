@@ -32,19 +32,6 @@ jobs:
       - name: Probe GSI and Hanesawa public source pages
         continue-on-error: true
         run: python research/acquire_boundary_sources_browser.py
-      - name: Acquire GSI public 400dpi standard image
-        if: always()
-        shell: bash
-        run: |
-          set -euxo pipefail
-          d='out-boundary-sources/gsi_usa_m58_a_6_135/direct-public-images'
-          mkdir -p "$d"
-          u='https://service.gsi.go.jp/map-photos/contents/screen/mapphoto/img/aerialphotograph/%E7%A9%BA%E4%B8%AD%E5%86%99%E7%9C%9F/USA/standard/M58-A-6/USA-M58-A-6-135.jpg'
-          curl -fL --retry 3 -H 'Referer: https://service.gsi.go.jp/map-photos/app/map?search=photo&id=11027' "$u" -o "$d/GSI_USA-M58-A-6-135_standard_400dpi.jpg"
-          file "$d"/*.jpg | tee "$d/FILE.txt"
-          identify "$d"/*.jpg | tee "$d/IMAGE-METADATA.txt" || true
-          sha256sum "$d"/*.jpg > "$d/SHA256SUMS.txt"
-          printf '%s\n' "$u" > "$d/SOURCE-URL.txt"
       - name: Summarize
         if: always()
         shell: bash
@@ -55,9 +42,10 @@ jobs:
           else
             echo 'SUMMARY.json not produced' >> "$GITHUB_STEP_SUMMARY"
           fi
-          if [ -f out-boundary-sources/gsi_usa_m58_a_6_135/direct-public-images/IMAGE-METADATA.txt ]; then
-            echo '### GSI 400dpi' >> "$GITHUB_STEP_SUMMARY"
-            cat out-boundary-sources/gsi_usa_m58_a_6_135/direct-public-images/IMAGE-METADATA.txt >> "$GITHUB_STEP_SUMMARY"
+          if ls out-boundary-sources/gsi_usa_m58_a_6_135/direct-public-images/*.jpg >/dev/null 2>&1; then
+            echo '### GSI 400dpi in-session acquisition' >> "$GITHUB_STEP_SUMMARY"
+            file out-boundary-sources/gsi_usa_m58_a_6_135/direct-public-images/*.jpg >> "$GITHUB_STEP_SUMMARY"
+            sha256sum out-boundary-sources/gsi_usa_m58_a_6_135/direct-public-images/*.jpg >> "$GITHUB_STEP_SUMMARY"
           fi
       - uses: actions/upload-artifact@v4
         if: always()
