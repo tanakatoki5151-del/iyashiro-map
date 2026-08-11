@@ -14,26 +14,29 @@ permissions:
 jobs:
   acquire:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 8
     steps:
       - name: Install image metadata dependency
         run: python3 -m pip install --disable-pip-version-check pillow
-      - name: Download official Memorial Museum database image and record provenance
+      - name: Download official museum image directly
         shell: bash
         run: |
           set -euxo pipefail
           mkdir -p out
           page='https://tokyoireikyoukai.com/data/91'
           img='https://tokyoireikyoukai.com/idf/2972215-00013.jpg'
-          curl -fL --retry 4 --retry-delay 2 -A 'Mozilla/5.0 iyashiro-map research' "$page" -o out/database-page.html
-          curl -fL --retry 4 --retry-delay 2 -A 'Mozilla/5.0 iyashiro-map research' -e "$page" "$img" -o out/official-museum-object-15-00013.jpg
+          # The catalogue page has intermittent TLS/connectivity stalls. The image URL is
+          # an official tokyoireikyoukai.com resource already identified from that page,
+          # so download it directly and record the catalogue page as provenance.
+          curl -fL --connect-timeout 15 --max-time 75 --retry 2 --retry-delay 2 \
+            -A 'Mozilla/5.0 iyashiro-map research' -e "$page" "$img" \
+            -o out/official-museum-object-15-00013.jpg
           file out/official-museum-object-15-00013.jpg > out/FILE.txt
-          sha256sum out/* > out/SHA256SUMS.txt
           python3 - <<'PY'
           from PIL import Image
-          import json, pathlib
+          import hashlib, json, pathlib
           p=pathlib.Path('out/official-museum-object-15-00013.jpg')
-          im=Image.open(p)
+          im=Image.open(p); im.verify(); im=Image.open(p)
           d={
             'databasePage':'https://tokyoireikyoukai.com/data/91',
             'imageUrl':'https://tokyoireikyoukai.com/idf/2972215-00013.jpg',
@@ -43,11 +46,14 @@ jobs:
             'pixelWidth':im.width,
             'pixelHeight':im.height,
             'mode':im.mode,
-            'status':'downloaded_from_official_museum_database',
-            'researchRule':'image may be used for internal research alignment; public reuse requires rights/permission review'
+            'bytes':p.stat().st_size,
+            'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),
+            'status':'downloaded_from_official_museum_image_endpoint',
+            'researchRule':'internal research alignment only unless provider reuse terms are separately cleared'
           }
           pathlib.Path('out/PROVENANCE.json').write_text(json.dumps(d,ensure_ascii=False,indent=2),encoding='utf-8')
           PY
+          sha256sum out/official-museum-object-15-00013.jpg out/PROVENANCE.json > out/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
