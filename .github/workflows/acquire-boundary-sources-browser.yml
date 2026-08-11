@@ -7,11 +7,13 @@ on:
     paths:
       - '.github/workflows/acquire-boundary-sources-browser.yml'
       - 'research/acquire_boundary_sources_browser.py'
+      - 'research/honjo_clothing_depot_archive_probe.py'
   pull_request:
     branches: [main]
     paths:
       - '.github/workflows/acquire-boundary-sources-browser.yml'
       - 'research/acquire_boundary_sources_browser.py'
+      - 'research/honjo_clothing_depot_archive_probe.py'
 
 permissions:
   contents: read
@@ -27,30 +29,36 @@ jobs:
           python-version: '3.12'
       - name: Install browser dependencies
         run: |
-          python -m pip install --disable-pip-version-check playwright
+          python -m pip install --disable-pip-version-check playwright requests beautifulsoup4
           python -m playwright install --with-deps chromium
       - name: Probe GSI and Hanesawa public source pages
         continue-on-error: true
         run: python research/acquire_boundary_sources_browser.py
+      - name: Acquire official Honjo clothing-depot archive
+        continue-on-error: true
+        run: python research/honjo_clothing_depot_archive_probe.py
       - name: Summarize
         if: always()
         shell: bash
         run: |
           echo '## Boundary source acquisition' >> "$GITHUB_STEP_SUMMARY"
-          if [ -f out-boundary-sources/SUMMARY.json ]; then
-            cat out-boundary-sources/SUMMARY.json >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo 'SUMMARY.json not produced' >> "$GITHUB_STEP_SUMMARY"
-          fi
-          if ls out-boundary-sources/gsi_usa_m58_a_6_135/direct-public-images/*.jpg >/dev/null 2>&1; then
-            echo '### GSI 400dpi in-session acquisition' >> "$GITHUB_STEP_SUMMARY"
-            file out-boundary-sources/gsi_usa_m58_a_6_135/direct-public-images/*.jpg >> "$GITHUB_STEP_SUMMARY"
-            sha256sum out-boundary-sources/gsi_usa_m58_a_6_135/direct-public-images/*.jpg >> "$GITHUB_STEP_SUMMARY"
+          if [ -f out-boundary-sources/SUMMARY.json ]; then cat out-boundary-sources/SUMMARY.json >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ -f out-honjo/download-report.json ]; then
+            echo '### Honjo clothing-depot official archive' >> "$GITHUB_STEP_SUMMARY"
+            python - <<'PY'
+import json
+r=json.load(open('out-honjo/download-report.json'))
+print('valid archives:',sum(bool(x.get('zipValid')) for x in r))
+for x in r:
+ if x.get('zipValid'): print(x.get('text'),x.get('url'),x.get('bytes'),x.get('sha256'))
+PY
           fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: boundary-source-browser-probe
-          path: out-boundary-sources
+          path: |
+            out-boundary-sources
+            out-honjo
           if-no-files-found: warn
           retention-days: 14
