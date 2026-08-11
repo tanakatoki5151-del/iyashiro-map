@@ -1,0 +1,118 @@
+name: Honjo p83 georeference research
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/honjo-clothing-depot-boundary-20260811]
+    paths:
+      - '.github/workflows/honjo-p83-georef-research.yml'
+      - 'research/honjo_georef_parts/**'
+      - 'research/HONJO-P83-GEOREF-QUALITY-GATE-20260812.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/honjo-p83-georef-research.yml'
+      - 'research/honjo_georef_parts/**'
+      - 'research/HONJO-P83-GEOREF-QUALITY-GATE-20260812.md'
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MPLBACKEND: Agg
+      HONJO_OUT: out-honjo-georef
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/honjo-clothing-depot-boundary-20260811
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install geospatial research dependencies
+        run: |
+          python -m pip install --disable-pip-version-check \
+            requests numpy pillow matplotlib shapely pyproj geopandas pyogrio \
+            opencv-python-headless pymupdf osm2geojson
+      - name: Reconstruct and compile research script
+        run: |
+          cat research/honjo_georef_parts/part*.pyfrag > /tmp/honjo_georef_research.py
+          python -m py_compile /tmp/honjo_georef_research.py
+          sha256sum /tmp/honjo_georef_research.py > honjo-georef-script.sha256
+      - name: Run evidence-first shape alignment
+        run: python /tmp/honjo_georef_research.py
+      - name: Enforce safety flags
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+          p=pathlib.Path('out-honjo-georef/AUDIT.json')
+          if not p.exists():
+              raise SystemExit('AUDIT.json missing')
+          a=json.loads(p.read_text())
+          q=a.get('qualityGate',{})
+          checks={
+              'scoringEffect': q.get('scoringEffect') == 'none',
+              'verifiedHistoricalSitePolygonCountEffect': q.get('verifiedHistoricalSitePolygonCountEffect') == 0,
+              'sourceBackedReviewPolygonCountEffect': q.get('sourceBackedReviewPolygonCountEffect') == 0,
+              'doNotAutoExclude': q.get('doNotAutoExclude') is True,
+              'doNotApplyDistancePenalty': q.get('doNotApplyDistancePenalty') is True,
+              'doNotChangeRanking': q.get('doNotChangeRanking') is True,
+              'notHistoricalBoundary': q.get('notHistoricalBoundary') is True,
+          }
+          print(json.dumps({'status':a.get('status'),'checks':checks},ensure_ascii=False,indent=2))
+          if not all(checks.values()):
+              sys.exit('safety flag failure')
+          PY
+      - name: Package research outputs
+        if: always()
+        run: |
+          python - <<'PY'
+          import pathlib, zipfile
+          root=pathlib.Path('out-honjo-georef')
+          out=pathlib.Path('honjo-p83-georef-research-v1-20260812.zip')
+          with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
+              if root.exists():
+                  for p in sorted(root.rglob('*')):
+                      if p.is_file(): z.write(p,p.relative_to(root.parent))
+              for p in [pathlib.Path('honjo-georef-script.sha256'), pathlib.Path('research/HONJO-P83-GEOREF-QUALITY-GATE-20260812.md')]:
+                  if p.exists(): z.write(p,p)
+          PY
+          sha256sum honjo-p83-georef-research-v1-20260812.zip > honjo-p83-georef-research-v1-20260812.zip.sha256
+      - name: Job summary
+        if: always()
+        run: |
+          echo '## Honjo p83 georeference research' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f out-honjo-georef/AUDIT.json ]; then
+            python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          a=json.load(open('out-honjo-georef/AUDIT.json'))
+          f=a.get('fit',{})
+          print('```json')
+          print(json.dumps({
+            'status':a.get('status'),
+            'parcelConsistency':f.get('parcelConsistency'),
+            'shapeFitIoU':f.get('shapeFitIoU'),
+            'shapeFitRmsM':f.get('shapeFitRmsM'),
+            'shapeFitHausdorffM':f.get('shapeFitHausdorffM'),
+            'outerAreaRatio':f.get('transformedOuterToPublishedFormerDepotAreaRatio'),
+            'qualityGate':a.get('qualityGate')
+          },ensure_ascii=False,indent=2))
+          print('```')
+          PY
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: honjo-p83-georef-research-v1-20260812
+          path: |
+            honjo-p83-georef-research-v1-20260812.zip
+            honjo-p83-georef-research-v1-20260812.zip.sha256
+            out-honjo-georef/AUDIT.json
+            out-honjo-georef/README.md
+            out-honjo-georef/derived/honjo-research-constraints-v1.geojson
+            out-honjo-georef/qc/*.png
+          if-no-files-found: warn
+          retention-days: 14
