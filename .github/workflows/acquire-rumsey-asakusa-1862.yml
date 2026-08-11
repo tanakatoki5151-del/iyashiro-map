@@ -1,0 +1,49 @@
+name: Acquire Rumsey Asakusa 1862 map
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/mlit-l03b-acquisition-20260811]
+    paths:
+      - '.github/workflows/acquire-rumsey-asakusa-1862.yml'
+      - 'research/acquire_rumsey_asakusa_1862.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/acquire-rumsey-asakusa-1862.yml'
+      - 'research/acquire_rumsey_asakusa_1862.py'
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check requests pillow
+      - name: Acquire public map resources
+        continue-on-error: true
+        run: python research/acquire_rumsey_asakusa_1862.py
+      - name: Publish summary
+        if: always()
+        shell: bash
+        run: |
+          echo '## Rumsey / UC Berkeley Asakusa 1862 map acquisition' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f out-rumsey-asakusa-1862/REPORT.json ]; then
+            cat out-rumsey-asakusa-1862/REPORT.json >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'REPORT.json not produced' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rumsey-asakusa-1862
+          path: out-rumsey-asakusa-1862
+          if-no-files-found: warn
+          retention-days: 14
