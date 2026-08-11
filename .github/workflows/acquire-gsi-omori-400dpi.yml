@@ -33,6 +33,7 @@ jobs:
           Date: 1946-02-28
           Scale: 1:11,845
           Usage: 国土地理院コンテンツ利用規約に従う
+          Acquisition purpose: source-backed historical boundary review
           EOF
       - uses: actions/upload-artifact@v4
         with:
