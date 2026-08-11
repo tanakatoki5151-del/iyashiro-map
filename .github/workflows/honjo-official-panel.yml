@@ -16,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Install image metadata dependency
+        run: python3 -m pip install --disable-pip-version-check pillow
       - name: Download official Memorial Museum database image and record provenance
         shell: bash
         run: |
@@ -47,7 +49,9 @@ jobs:
           pathlib.Path('out/PROVENANCE.json').write_text(json.dumps(d,ensure_ascii=False,indent=2),encoding='utf-8')
           PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: honjo-official-museum-panel
           path: out
+          if-no-files-found: warn
           retention-days: 14
