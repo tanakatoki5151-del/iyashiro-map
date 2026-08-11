@@ -1,0 +1,41 @@
+name: Acquire GSI Omori 400dpi image
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/mlit-l03b-acquisition-20260811]
+    paths:
+      - '.github/workflows/acquire-gsi-omori-400dpi.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download public 100dpi and 400dpi GSI images
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p out
+          base='https://service.gsi.go.jp/map-photos/contents/screen/mapphoto/img/aerialphotograph/%E7%A9%BA%E4%B8%AD%E5%86%99%E7%9C%9F/USA'
+          curl -fL --retry 3 "$base/simple/M58-A-6/USA-M58-A-6-135.jpg" -o out/GSI_USA-M58-A-6-135_simple.jpg
+          curl -fL --retry 3 "$base/standard/M58-A-6/USA-M58-A-6-135.jpg" -o out/GSI_USA-M58-A-6-135_standard_400dpi.jpg
+          file out/*.jpg | tee out/FILE.txt
+          identify out/*.jpg | tee out/IMAGE-METADATA.txt || true
+          sha256sum out/*.jpg > out/SHA256SUMS.txt
+          cat > out/PROVENANCE.txt <<'EOF'
+          Source: 国土地理院 地図・空中写真閲覧サービス
+          Photo ID: 11027
+          Reference: USA-M58-A-6-135
+          Date: 1946-02-28
+          Scale: 1:11,845
+          Usage: 国土地理院コンテンツ利用規約に従う
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gsi-omori-USA-M58-A-6-135-400dpi
+          path: out
+          retention-days: 14
