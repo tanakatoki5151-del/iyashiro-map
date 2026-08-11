@@ -1,0 +1,51 @@
+name: Acquire boundary source images
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/mlit-l03b-acquisition-20260811]
+    paths:
+      - '.github/workflows/acquire-boundary-sources-browser.yml'
+      - 'research/acquire_boundary_sources_browser.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/acquire-boundary-sources-browser.yml'
+      - 'research/acquire_boundary_sources_browser.py'
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install browser dependencies
+        run: |
+          python -m pip install --disable-pip-version-check playwright
+          python -m playwright install --with-deps chromium
+      - name: Probe GSI and Hanesawa public source pages
+        continue-on-error: true
+        run: python research/acquire_boundary_sources_browser.py
+      - name: Summarize
+        if: always()
+        shell: bash
+        run: |
+          echo '## Boundary source acquisition' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f out-boundary-sources/SUMMARY.json ]; then
+            cat out-boundary-sources/SUMMARY.json >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'SUMMARY.json not produced' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: boundary-source-browser-probe
+          path: out-boundary-sources
+          if-no-files-found: warn
+          retention-days: 14
