@@ -43,16 +43,7 @@ jobs:
         run: |
           echo '## Boundary source acquisition' >> "$GITHUB_STEP_SUMMARY"
           if [ -f out-boundary-sources/SUMMARY.json ]; then cat out-boundary-sources/SUMMARY.json >> "$GITHUB_STEP_SUMMARY"; fi
-          if [ -f out-honjo/download-report.json ]; then
-            echo '### Honjo clothing-depot official archive' >> "$GITHUB_STEP_SUMMARY"
-            python - <<'PY'
-import json
-r=json.load(open('out-honjo/download-report.json'))
-print('valid archives:',sum(bool(x.get('zipValid')) for x in r))
-for x in r:
- if x.get('zipValid'): print(x.get('text'),x.get('url'),x.get('bytes'),x.get('sha256'))
-PY
-          fi
+          if [ -f out-honjo/download-report.json ]; then echo '### Honjo archive acquired' >> "$GITHUB_STEP_SUMMARY"; cat out-honjo/download-report.json | head -c 4000 >> "$GITHUB_STEP_SUMMARY"; fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
