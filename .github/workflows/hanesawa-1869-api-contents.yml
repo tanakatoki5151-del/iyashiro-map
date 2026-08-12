@@ -1,0 +1,55 @@
+name: Hanesawa 1869 archive contents API
+on:
+  push:
+    branches:
+      - research/mlit-l03b-acquisition-20260811
+    paths:
+      - '.github/workflows/hanesawa-1869-api-contents.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Call public contents API and fetch referenced image metadata/assets
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p out
+          base='https://dasasp03.i-repository.net/il/'
+          record='https://dasasp03.i-repository.net/il/meta_pub/G0000002tokyoarchv03_0001165130001'
+          api='https://dasasp03.i-repository.net/il/contents/api_contents?IS_DBID=G0000002tokyoarchv03&IS_RKEY_1=/000116513'
+          curl -fL --connect-timeout 12 --max-time 60 --retry 2 -A 'Mozilla/5.0 iyashiro-map research' -e "$record" "$api" -o out/api-contents.txt
+          python3 - <<'PY'
+          import json, pathlib, re, html, urllib.parse, requests, hashlib
+          out=pathlib.Path('out'); raw=(out/'api-contents.txt').read_text(errors='ignore')
+          report={'apiUrl':'https://dasasp03.i-repository.net/il/contents/api_contents?IS_DBID=G0000002tokyoarchv03&IS_RKEY_1=/000116513','bytes':len(raw.encode()),'responsePreview':raw[:10000],'urls':[],'downloads':[]}
+          urls=[]
+          # JSON-aware and broad URL/path extraction.
+          try:
+            obj=json.loads(raw); report['jsonType']=type(obj).__name__; report['json']=obj
+          except Exception as e: report['jsonError']=repr(e)
+          for m in re.findall(r'''(?:https?:)?//[^\"'<>\\\s]+|(?:\.\.?/|/)[^\"'<>\\\s]+''', raw):
+            u=html.unescape(m).replace('\\/','/')
+            if any(k in u.lower() for k in ['image','img','contents','jpg','jpeg','png','tif','tiff','jp2','pdf','thumb']):
+              urls.append(urllib.parse.urljoin('https://dasasp03.i-repository.net/il/contents/',u))
+          urls=list(dict.fromkeys(urls)); report['urls']=urls
+          s=requests.Session(); s.headers.update({'User-Agent':'Mozilla/5.0 iyashiro-map research','Referer':'https://dasasp03.i-repository.net/il/meta_pub/G0000002tokyoarchv03_0001165130001'})
+          for i,u in enumerate(urls[:300]):
+            try:
+              r=s.get(u,timeout=20,allow_redirects=True); ct=(r.headers.get('content-type') or '').lower(); rec={'url':u,'status':r.status_code,'finalUrl':r.url,'contentType':ct,'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest()}
+              if r.ok and (ct.startswith('image/') or 'pdf' in ct) and len(r.content)>10000:
+                ext='pdf' if 'pdf' in ct else ('png' if 'png' in ct else 'jpg'); fn=f'asset-{len(report["downloads"]):03d}.{ext}'; (out/fn).write_bytes(r.content); rec['savedAs']=fn; report['downloads'].append(rec)
+            except Exception as e: report['downloads'].append({'url':u,'error':repr(e)})
+          (out/'REPORT.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+          PY
+          sha256sum out/* > out/SHA256SUMS.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hanesawa-1869-api-contents
+          path: out
+          if-no-files-found: warn
+          retention-days: 14
