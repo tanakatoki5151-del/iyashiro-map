@@ -16,6 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check requests beautifulsoup4
       - name: Fetch Tokyo Archives Honjo reconstruction map page and public images
         shell: bash
         run: |
@@ -39,7 +43,6 @@ jobs:
               alt=img.get('alt','')
               if fid or '0701syoko_kara11' in u:
                   rows.append({'url':u,'fileEntryId':fid,'alt':alt})
-          # preserve order and de-duplicate URLs
           seen=set(); rows=[r for r in rows if not (r['url'] in seen or seen.add(r['url']))]
           Path('out/candidates.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2),encoding='utf-8')
           print(json.dumps(rows,ensure_ascii=False,indent=2))
