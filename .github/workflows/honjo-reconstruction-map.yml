@@ -24,34 +24,44 @@ jobs:
           page='https://www.soumu.metro.tokyo.lg.jp/01soumu-archives/07edo_tokyo/0701syoko_kara11'
           curl -fL --connect-timeout 15 --max-time 90 --retry 3 -A 'Mozilla/5.0 iyashiro-map research' "$page" -o out/page.html
           python3 - <<'PY'
-          from html.parser import HTMLParser
           from pathlib import Path
-          import urllib.parse, json, re
+          from bs4 import BeautifulSoup
+          import urllib.parse, json
           html=Path('out/page.html').read_text(errors='ignore')
           base='https://www.soumu.metro.tokyo.lg.jp/01soumu-archives/07edo_tokyo/0701syoko_kara11'
-          urls=[]
-          for m in re.finditer(r'(?:src|href)=["\']([^"\']+)["\']', html, re.I):
-              u=urllib.parse.urljoin(base,m.group(1))
-              if re.search(r'\.(?:jpg|jpeg|png|gif|pdf)(?:\?|$)',u,re.I): urls.append(u)
-          urls=list(dict.fromkeys(urls))
-          Path('out/candidates.json').write_text(json.dumps(urls,ensure_ascii=False,indent=2),encoding='utf-8')
-          print('\n'.join(urls))
+          soup=BeautifulSoup(html,'html.parser')
+          rows=[]
+          for img in soup.find_all('img'):
+              src=img.get('src')
+              if not src: continue
+              u=urllib.parse.urljoin(base,src)
+              fid=img.get('data-fileentryid')
+              alt=img.get('alt','')
+              if fid or '0701syoko_kara11' in u:
+                  rows.append({'url':u,'fileEntryId':fid,'alt':alt})
+          # preserve order and de-duplicate URLs
+          seen=set(); rows=[r for r in rows if not (r['url'] in seen or seen.add(r['url']))]
+          Path('out/candidates.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps(rows,ensure_ascii=False,indent=2))
           PY
           python3 - <<'PY'
-          import json, pathlib, requests, hashlib, urllib.parse, re
-          out=pathlib.Path('out'); urls=json.loads((out/'candidates.json').read_text())
+          import json, pathlib, requests, hashlib, re
+          out=pathlib.Path('out'); rows=json.loads((out/'candidates.json').read_text())
           s=requests.Session(); s.headers.update({'User-Agent':'Mozilla/5.0 iyashiro-map research','Referer':'https://www.soumu.metro.tokyo.lg.jp/'})
-          rows=[]
-          for i,u in enumerate(urls):
+          report=[]
+          for i,item in enumerate(rows):
+              u=item['url']
               try:
                   r=s.get(u,timeout=60); ct=(r.headers.get('content-type') or '').lower()
-                  row={'url':u,'status':r.status_code,'contentType':ct,'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest()}
-                  if r.ok and (ct.startswith('image/') or 'pdf' in ct) and len(r.content)>20000:
-                      ext='pdf' if 'pdf' in ct else ('png' if 'png' in ct else 'jpg')
-                      fn=f'asset-{i:03d}.{ext}'; (out/fn).write_bytes(r.content); row['savedAs']=fn
-                  rows.append(row)
-              except Exception as e: rows.append({'url':u,'error':repr(e)})
-          (out/'REPORT.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2),encoding='utf-8')
+                  rec={**item,'status':r.status_code,'finalUrl':r.url,'contentType':ct,'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest()}
+                  if r.ok and ct.startswith('image/') and len(r.content)>10000:
+                      ext='png' if 'png' in ct else 'jpg'
+                      slug=re.sub(r'[^A-Za-z0-9_-]+','_',item.get('alt') or f'asset_{i}')[:60]
+                      fn=f'{i:02d}_{item.get("fileEntryId") or "na"}_{slug}.{ext}'
+                      (out/fn).write_bytes(r.content); rec['savedAs']=fn
+                  report.append(rec)
+              except Exception as e: report.append({**item,'error':repr(e)})
+          (out/'REPORT.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
           PY
           sha256sum out/* > out/SHA256SUMS.txt || true
       - uses: actions/upload-artifact@v4
