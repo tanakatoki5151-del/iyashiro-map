@@ -1,0 +1,31 @@
+name: Hanesawa 1869 Tokyo Archives probe
+on:
+  push:
+    branches:
+      - research/mlit-l03b-acquisition-20260811
+    paths:
+      - '.github/workflows/hanesawa-1869-archive.yml'
+      - 'research/probe_hanesawa_1869_archive.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check requests beautifulsoup4
+      - name: Probe public archive
+        continue-on-error: true
+        run: python research/probe_hanesawa_1869_archive.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hanesawa-1869-archive
+          path: out-hanesawa-1869
+          if-no-files-found: warn
+          retention-days: 14
