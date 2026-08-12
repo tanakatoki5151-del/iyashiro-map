@@ -1,0 +1,41 @@
+name: Priority cells NDL catalog scan v2
+
+on:
+  push:
+    branches:
+      - research/mlit-l03b-acquisition-20260811
+    paths:
+      - '.github/workflows/priority-cells-ndl-scan-v2.yml'
+      - 'research/scan_priority_cells_ndl_v2.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check requests
+      - name: Run NDL OpenSearch scan
+        run: python research/scan_priority_cells_ndl_v2.py
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          if [ -f out-priority-ndl-v2/SUMMARY.json ]; then
+            echo '## Priority cells NDL catalog scan v2' >> "$GITHUB_STEP_SUMMARY"
+            cat out-priority-ndl-v2/SUMMARY.json | head -c 12000 >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: priority-cells-ndl-scan-v2
+          path: out-priority-ndl-v2
+          if-no-files-found: warn
+          retention-days: 14
