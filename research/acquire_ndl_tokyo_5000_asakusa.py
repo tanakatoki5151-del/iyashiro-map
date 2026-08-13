@@ -224,6 +224,7 @@ async def main() -> None:
             "childItemUrl": child_url,
             "digitalCollectionUrl": digital_url,
             "networkResponseCount": len(network),
+            "searchResultNavigation": "resolved_ancestor_href_with_force_click_fallback",
             "savedNetworkPayloadCount": sum(1 for r in network if r.get("savedAs")),
             "candidateResourceCount": len(candidates),
             "acquiredResourceCount": sum(1 for r in acquired if r.get("savedAs")),
