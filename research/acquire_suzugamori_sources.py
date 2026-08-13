@@ -403,7 +403,7 @@ async def capture_rumsey_and_gsi() -> dict[str, Any]:
             downloads.append(row)
         (folder/"photo-metadata.json").write_text(json.dumps(metadata,ensure_ascii=False,indent=2),encoding="utf-8")
         (folder/"downloads.json").write_text(json.dumps(downloads,ensure_ascii=False,indent=2),encoding="utf-8")
-        report["gsi"]={"resultRowCount":len(rows),"metadataCount":len(metadata),"coveringPhotoCount":sum(1 for r in metadata if r.get("containsProxyPoint")),"selectedPhotoIds":[r.get("apiPhotoId") for r in selected],"downloadedCount":sum(1 for d in downloads if d.get("savedAs"))}
+        report["gsi"]={"searchMethod":"public_photo_api_bbox_1935_1950","resultRowCount":len(rows),"metadataCount":len(metadata),"coveringPhotoCount":sum(1 for r in metadata if r.get("containsProxyPoint")),"selectedPhotoIds":[r.get("apiPhotoId") for r in selected],"downloadedCount":sum(1 for d in downloads if d.get("savedAs"))}
         await context.close(); await browser.close()
     return report
 
