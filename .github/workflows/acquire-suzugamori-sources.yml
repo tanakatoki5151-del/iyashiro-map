@@ -3,12 +3,16 @@ name: Acquire Suzukamori execution-ground sources
 on:
   workflow_dispatch:
   push:
-    branches: [research/mlit-l03b-acquisition-20260811]
+    branches:
+      - research/mlit-l03b-acquisition-20260811
+      - agent/research-ci-hardening-20260814
     paths:
       - '.github/workflows/acquire-suzugamori-sources.yml'
       - 'research/acquire_suzugamori_sources.py'
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - research/mlit-l03b-acquisition-20260811
     paths:
       - '.github/workflows/acquire-suzugamori-sources.yml'
       - 'research/acquire_suzugamori_sources.py'
@@ -30,22 +34,32 @@ jobs:
           python -m pip install --disable-pip-version-check requests pyproj shapely playwright
           python -m playwright install --with-deps chromium
       - name: Acquire official archaeology, georeferenced maps and aerial photos
-        continue-on-error: true
+        id: acquire
         run: python research/acquire_suzugamori_sources.py
       - name: Publish summary
         if: always()
         shell: bash
         run: |
           echo '## Suzukamori source acquisition' >> "$GITHUB_STEP_SUMMARY"
+          echo "- acquisition outcome: ${{ steps.acquire.outcome }}" >> "$GITHUB_STEP_SUMMARY"
           if [ -f out-suzugamori-sources/SUMMARY.json ]; then
             cat out-suzugamori-sources/SUMMARY.json >> "$GITHUB_STEP_SUMMARY"
           else
-            echo 'SUMMARY.json was not produced' >> "$GITHUB_STEP_SUMMARY"
+            echo '- SUMMARY.json was not produced' >> "$GITHUB_STEP_SUMMARY"
           fi
-      - uses: actions/upload-artifact@v4
+      - name: Preserve complete or partial evidence
+        id: upload
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: suzukamori-sources
           path: out-suzugamori-sources
           if-no-files-found: warn
           retention-days: 14
+      - name: Fail closed on acquisition or contract failure
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ steps.acquire.outcome }}" = 'success'
+          test -s out-suzugamori-sources/SUMMARY.json
