@@ -1,20 +1,15 @@
 #!/usr/bin/env python3
-"""Discover and acquire public GSI aerial photos covering Sugamo Prison.
+"""Discover and acquire public GSI aerial photos around the Oyama/Nishihara study area.
 
-The search is centered on the V10 proxy cell g122-262
-(35.730054, 139.719312), but that point is used only to find imagery. It is
-not treated as the historical facility boundary.
+This research-branch acquisition is centered on the current V10 representative
+cell g187-221 (35.669867, 139.675142). The point is used only to select imagery
+covering the broader old Yoyogi-Oyama / current Nishihara boundary area. It is
+NOT treated as the historical Tokyo Juvenile/Medical Training School location.
 
-The script:
-- opens the public GSI map-photo service,
-- accepts the displayed terms,
-- searches the current map extent for 1945-1950 US-military photographs,
-- records result rows and API metadata,
-- retains only photos whose official four-corner footprint contains the proxy
-  point or lies very close to it,
-- downloads public 400dpi standard images in the same browser session.
-
-No login is used and no access control is bypassed.
+The target period 1945-1950 includes the January 1949 move of Tokyo Juvenile
+Training School to old Yoyogi-Oyama, so the imagery may independently constrain
+where the institution stood. No login/access-control bypass is used and no
+scoring change is allowed from imagery alone.
 """
 from __future__ import annotations
 
@@ -28,9 +23,10 @@ from urllib.parse import urljoin
 
 from playwright.async_api import async_playwright
 
-OUT = Path("out-gsi-sugamo-prison")
-CENTER_LON = 139.719312
-CENTER_LAT = 35.730054
+OUT = Path("out-gsi-sugamo-prison")  # protected workflow-compatible output path; content label below is authoritative
+STUDY_LABEL = "Oyama-Nishihara Tokyo Juvenile Training School acquisition gate"
+CENTER_LON = 139.675142
+CENTER_LAT = 35.669867
 PAGE_URL = (
     "https://service.gsi.go.jp/map-photos/app/map?search=photo"
     "&search_date_from=1945&search_date_to=1950"
@@ -49,7 +45,6 @@ def sha256(path: Path) -> str:
 
 
 def point_in_polygon(lon: float, lat: float, corners: list[list[float]]) -> bool:
-    """Ray-casting in lon/lat; adequate for small official image footprints."""
     x, y = lon, lat
     inside = False
     pts = corners + [corners[0]]
@@ -102,7 +97,6 @@ async def main() -> None:
             await agree.first.click(timeout=10_000)
             await page.wait_for_timeout(2_000)
 
-        # Explicitly set the search controls, regardless of query-string defaults.
         await page.locator('#photo select[aria-label="yearfrom"]').select_option("1945")
         await page.locator('#photo select[aria-label="yearto"]').select_option("1950")
         await page.locator("#plannerSelector").select_option(label="米軍")
@@ -113,29 +107,19 @@ async def main() -> None:
         (OUT / "body.txt").write_text(await page.locator("body").inner_text(), encoding="utf-8")
 
         rows = await page.locator("#search_result_pane .ag-center-cols-container .ag-row").evaluate_all(
-            """els => els.map(e => ({
-                rowId: e.getAttribute('row-id'),
-                className: e.className,
-                text: (e.innerText || '').trim()
-            }))"""
+            """els => els.map(e => ({rowId:e.getAttribute('row-id'),className:e.className,text:(e.innerText||'').trim()}))"""
         )
         (OUT / "result-rows.json").write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
         ids = []
         for row in rows:
             rid = row.get("rowId") or ""
-            if rid.isdigit():
-                ids.append(int(rid))
+            if rid.isdigit(): ids.append(int(rid))
             else:
                 m = re.search(r"specid-(\d+)", row.get("className") or "")
-                if m:
-                    ids.append(int(m.group(1)))
-        ids = sorted(set(ids))
-
-        # Fallback: recover IDs from API responses or rendered HTML.
+                if m: ids.append(int(m.group(1)))
         for item in api_payloads:
             text = json.dumps(item["payload"], ensure_ascii=False)
-            for m in re.finditer(r'"(?:specification_id|id)"\s*:\s*(\d+)', text):
-                ids.append(int(m.group(1)))
+            for m in re.finditer(r'"(?:specification_id|id)"\s*:\s*(\d+)', text): ids.append(int(m.group(1)))
         html_text = await page.content()
         ids.extend(int(x) for x in re.findall(r"specid-(\d+)", html_text))
         ids = sorted(set(ids))
@@ -144,109 +128,52 @@ async def main() -> None:
         errors: list[dict] = []
         for photo_id in ids:
             try:
-                response = await context.request.get(
-                    f"{API_BASE}/{photo_id}",
-                    headers={"Referer": PAGE_URL, "Accept": "application/json"},
-                    timeout=30_000,
-                    fail_on_status_code=False,
-                )
+                response = await context.request.get(f"{API_BASE}/{photo_id}",headers={"Referer":PAGE_URL,"Accept":"application/json"},timeout=30_000,fail_on_status_code=False)
                 if response.status != 200:
-                    errors.append({"photoId": photo_id, "status": response.status})
-                    continue
-                payload = await response.json()
-                result = payload.get("results") or {}
-                if not result:
-                    continue
+                    errors.append({"photoId": photo_id, "status": response.status}); continue
+                payload = await response.json(); result = payload.get("results") or {}
+                if not result: continue
                 result["apiPhotoId"] = photo_id
-                corners = [
-                    result.get("geom_image_left_top_pos"),
-                    result.get("geom_image_right_top_pos"),
-                    result.get("geom_image_right_bottom_pos"),
-                    result.get("geom_image_left_bottom_pos"),
-                ]
+                corners = [result.get("geom_image_left_top_pos"),result.get("geom_image_right_top_pos"),result.get("geom_image_right_bottom_pos"),result.get("geom_image_left_bottom_pos")]
                 corners = [c for c in corners if isinstance(c, list) and len(c) == 2]
                 result["containsProxyPoint"] = len(corners) == 4 and point_in_polygon(CENTER_LON, CENTER_LAT, corners)
                 center = result.get("geom_center_pos") or [None, None]
-                if len(center) == 2 and all(isinstance(v, (int, float)) for v in center):
-                    result["centerDistanceM"] = haversine_m(CENTER_LON, CENTER_LAT, center[0], center[1])
+                if len(center) == 2 and all(isinstance(v, (int, float)) for v in center): result["centerDistanceM"] = haversine_m(CENTER_LON,CENTER_LAT,center[0],center[1])
                 metadata.append(result)
             except Exception as exc:
-                errors.append({"photoId": photo_id, "error": f"{type(exc).__name__}: {exc}"})
+                errors.append({"photoId":photo_id,"error":f"{type(exc).__name__}: {exc}"})
 
-        metadata.sort(key=lambda r: (not r.get("containsProxyPoint", False), r.get("centerDistanceM", 1e99)))
-        (OUT / "photo-metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
-        (OUT / "network-api.json").write_text(json.dumps(network_urls, ensure_ascii=False, indent=2), encoding="utf-8")
-        (OUT / "captured-api-payloads.json").write_text(json.dumps(api_payloads, ensure_ascii=False, indent=2), encoding="utf-8")
-        (OUT / "errors.json").write_text(json.dumps(errors, ensure_ascii=False, indent=2), encoding="utf-8")
+        metadata.sort(key=lambda r:(not r.get("containsProxyPoint",False),r.get("centerDistanceM",1e99)))
+        (OUT/"photo-metadata.json").write_text(json.dumps(metadata,ensure_ascii=False,indent=2),encoding="utf-8")
+        (OUT/"network-api.json").write_text(json.dumps(network_urls,ensure_ascii=False,indent=2),encoding="utf-8")
+        (OUT/"captured-api-payloads.json").write_text(json.dumps(api_payloads,ensure_ascii=False,indent=2),encoding="utf-8")
+        (OUT/"errors.json").write_text(json.dumps(errors,ensure_ascii=False,indent=2),encoding="utf-8")
 
-        # Keep photos that cover the proxy point; if none, take the six nearest results.
-        selected = [r for r in metadata if r.get("containsProxyPoint")]
-        if not selected:
-            selected = metadata[:6]
-        selected = selected[:12]
-        downloads: list[dict] = []
+        selected=[r for r in metadata if r.get("containsProxyPoint")]
+        if not selected: selected=metadata[:8]
+        selected=selected[:16]
+        downloads=[]
         for item in selected:
-            rel = item.get("url_image_standard")
+            rel=item.get("url_image_standard")
             if not rel:
-                downloads.append({"photoId": item.get("apiPhotoId"), "status": "no_standard_image"})
-                continue
-            url = urljoin(IMAGE_BASE, rel)
-            response = await context.request.get(
-                url,
-                headers={
-                    "Referer": PAGE_URL,
-                    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-                },
-                timeout=120_000,
-                fail_on_status_code=False,
-            )
-            body = await response.body()
-            row = {
-                "photoId": item.get("apiPhotoId"),
-                "referenceNumber": item.get("reference_number"),
-                "courseNumber": item.get("course_number"),
-                "photoNumber": item.get("photo_number"),
-                "date": item.get("search_date"),
-                "scale": item.get("scale"),
-                "containsProxyPoint": item.get("containsProxyPoint"),
-                "centerDistanceM": item.get("centerDistanceM"),
-                "url": url,
-                "status": response.status,
-                "contentType": response.headers.get("content-type"),
-                "bytes": len(body),
-            }
+                downloads.append({"photoId":item.get("apiPhotoId"),"status":"no_standard_image"}); continue
+            url=urljoin(IMAGE_BASE,rel)
+            response=await context.request.get(url,headers={"Referer":PAGE_URL,"Accept":"image/avif,image/webp,image/apng,image/*,*/*;q=0.8"},timeout=120_000,fail_on_status_code=False)
+            body=await response.body()
+            row={"photoId":item.get("apiPhotoId"),"referenceNumber":item.get("reference_number"),"courseNumber":item.get("course_number"),"photoNumber":item.get("photo_number"),"date":item.get("search_date"),"scale":item.get("scale"),"containsProxyPoint":item.get("containsProxyPoint"),"centerDistanceM":item.get("centerDistanceM"),"url":url,"status":response.status,"contentType":response.headers.get("content-type"),"bytes":len(body)}
             if response.status == 200 and body[:3] == b"\xff\xd8\xff":
-                name = f"{item.get('reference_number')}-{item.get('course_number')}-{item.get('photo_number')}_id{item.get('apiPhotoId')}_400dpi.jpg"
-                name = re.sub(r"[^A-Za-z0-9._-]+", "_", name)
-                path = images_dir / name
-                path.write_bytes(body)
-                row["savedAs"] = str(path.relative_to(OUT))
-                row["sha256"] = hashlib.sha256(body).hexdigest()
-            else:
-                row["error"] = "not a valid JPEG"
+                name=f"{item.get('reference_number')}-{item.get('course_number')}-{item.get('photo_number')}_id{item.get('apiPhotoId')}_400dpi.jpg"; name=re.sub(r"[^A-Za-z0-9._-]+","_",name)
+                path=images_dir/name; path.write_bytes(body); row["savedAs"]=str(path.relative_to(OUT)); row["sha256"]=hashlib.sha256(body).hexdigest()
+            else: row["error"]="not a valid JPEG"
             downloads.append(row)
 
-        (OUT / "downloads.json").write_text(json.dumps(downloads, ensure_ascii=False, indent=2), encoding="utf-8")
-        with (OUT / "SHA256SUMS.txt").open("w", encoding="utf-8") as f:
-            for path in sorted(images_dir.glob("*.jpg")):
-                f.write(f"{sha256(path)}  {path.name}\n")
+        (OUT/"downloads.json").write_text(json.dumps(downloads,ensure_ascii=False,indent=2),encoding="utf-8")
+        with (OUT/"SHA256SUMS.txt").open("w",encoding="utf-8") as f:
+            for path in sorted(images_dir.glob("*.jpg")): f.write(f"{sha256(path)}  {path.name}\n")
 
-        summary = {
-            "proxyPoint": [CENTER_LON, CENTER_LAT],
-            "searchYears": [1945, 1950],
-            "planner": "米軍",
-            "resultRowCount": len(rows),
-            "metadataCount": len(metadata),
-            "coveringPhotoCount": sum(1 for r in metadata if r.get("containsProxyPoint")),
-            "selectedPhotoIds": [r.get("apiPhotoId") for r in selected],
-            "downloadedCount": sum(1 for d in downloads if d.get("savedAs")),
-            "qualityRule": "The proxy point selects imagery only. Facility boundaries require visible walls/fences plus independent archival corroboration; no scoring change is allowed from this acquisition alone.",
-        }
-        (OUT / "SUMMARY.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(json.dumps(summary, ensure_ascii=False, indent=2))
-        await context.close()
-        await browser.close()
+        summary={"studyLabel":STUDY_LABEL,"proxyPoint":[CENTER_LON,CENTER_LAT],"proxyCellId":"g187-221","searchYears":[1945,1950],"planner":"米軍","historicalEvent":"Tokyo Juvenile Training School moved to old Yoyogi-Oyama in January 1949","resultRowCount":len(rows),"metadataCount":len(metadata),"coveringPhotoCount":sum(1 for r in metadata if r.get("containsProxyPoint")),"selectedPhotoIds":[r.get("apiPhotoId") for r in selected],"downloadedCount":sum(1 for d in downloads if d.get("savedAs")),"qualityRule":"The proxy point selects imagery only. The historical institution parcel must be identified independently from visible facility form plus archival/old-address evidence. Current Oyama cell is not assumed to contain the institution. scoringEffect=none."}
+        (OUT/"SUMMARY.json").write_text(json.dumps(summary,ensure_ascii=False,indent=2),encoding="utf-8")
+        print(json.dumps(summary,ensure_ascii=False,indent=2))
+        await context.close(); await browser.close()
 
-
-if __name__ == "__main__":
-    asyncio.run(main())
+if __name__ == "__main__": asyncio.run(main())
