@@ -1,0 +1,36 @@
+name: Priority cells NDL historical aliases v5
+
+on:
+  push:
+    branches:
+      - research/mlit-l03b-acquisition-20260811
+    paths:
+      - 'research/scan_priority_cells_ndl_v5_historical_aliases.py'
+      - '.github/workflows/priority-ndl-v5-historical-aliases.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check requests
+      - name: Scan NDL historical aliases sequentially
+        run: python research/scan_priority_cells_ndl_v5_historical_aliases.py
+      - name: Print summary
+        if: always()
+        run: cat out-priority-ndl-v5-historical-aliases/SUMMARY.json || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: priority-ndl-v5-historical-aliases
+          path: out-priority-ndl-v5-historical-aliases
+          if-no-files-found: warn
+          retention-days: 14
