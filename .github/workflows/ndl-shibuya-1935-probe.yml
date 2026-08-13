@@ -1,0 +1,43 @@
+name: NDL Shibuya 1935 cadastral access probe
+
+on:
+  push:
+    branches:
+      - research/mlit-l03b-acquisition-20260811
+    paths:
+      - 'research/probe_ndl_shibuya_1935_cadastral.py'
+      - '.github/workflows/ndl-shibuya-1935-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check requests
+      - run: python research/probe_ndl_shibuya_1935_cadastral.py
+      - name: Print report
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('out-ndl-shibuya-1935-probe/REPORT.json'))
+          print(json.dumps(d['summary'],ensure_ascii=False,indent=2))
+          for x in d['pids']:
+              print(x['pid'],x.get('manifestStatus'),x.get('canvasCount'),x.get('rangeHits'))
+              print(x.get('imageSamples'))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ndl-shibuya-1935-probe
+          path: out-ndl-shibuya-1935-probe
+          if-no-files-found: warn
+          retention-days: 14
