@@ -1,0 +1,47 @@
+name: NDL 1912 Honjo cadastral IIIF acquisition
+
+on:
+  push:
+    branches:
+      - research/mlit-l03b-acquisition-20260811
+    paths:
+      - 'research/acquire_ndl_honjo_1912.py'
+      - '.github/workflows/ndl-honjo-1912.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check requests
+      - name: Acquire public NDL IIIF scans
+        run: python research/acquire_ndl_honjo_1912.py
+      - name: Show report summary
+        if: always()
+        run: |
+          test -f out-ndl-honjo-1912/REPORT.json && python - <<'PY'
+          import json
+          p='out-ndl-honjo-1912/REPORT.json'
+          d=json.load(open(p))
+          print('canvasCount=',d.get('canvasCount'))
+          print('honjoRangeLabels=',d.get('honjoRangeLabels'))
+          print('downloaded=',len(d.get('downloaded',[])))
+          print('errors=',len(d.get('errors',[])))
+          for x in d.get('downloaded',[]):
+              print(x.get('scanOneBased'),x.get('label'),x.get('savedAs'),x.get('bytes'))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ndl-honjo-1912
+          path: out-ndl-honjo-1912
+          if-no-files-found: warn
+          retention-days: 14
