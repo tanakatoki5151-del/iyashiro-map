@@ -119,7 +119,19 @@ async def main() -> None:
             if href:
                 await page.goto(href, wait_until="domcontentloaded", timeout=120_000)
         else:
-            await target.click(timeout=20_000)
+            # Search cards may render the title inside a hidden span. Resolve its
+            # ancestor href and navigate directly instead of depending on a click.
+            anchor = target.locator("xpath=ancestor::a[1]")
+            href = await anchor.get_attribute("href") if await anchor.count() else None
+            if not href:
+                href = await target.evaluate(
+                    "el => (el.closest('a') && el.closest('a').href) || "
+                    "(el.parentElement && el.parentElement.closest('a') && el.parentElement.closest('a').href) || null"
+                )
+            if href:
+                await page.goto(urljoin(page.url, href), wait_until="domcontentloaded", timeout=120_000)
+            else:
+                await target.click(timeout=20_000, force=True)
             await page.wait_for_timeout(8_000)
 
         await page.screenshot(path=str(OUT / "02_child_item.png"), full_page=True)
