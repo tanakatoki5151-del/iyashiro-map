@@ -1,30 +1,30 @@
 #!/usr/bin/env python3
-"""Acquire a reproducible NARO Rapid Survey Map view around Kozukappara.
+"""Acquire a reproducible NARO Rapid Survey Map view around a study point.
 
-The script opens the official NARO Historical Agro-Environment viewer at the
-Kozukappara study point, saves rendered map screenshots, DOM/network evidence,
-and every public raster response needed to reproduce the view. It also probes
-OpenLayers-like global map objects for exact center, zoom, extent and viewport
-metadata.
+Defaults preserve the original Kozukappara acquisition. Environment variables
+NARO_LAT, NARO_LON, NARO_OUT and NARO_LABEL allow the same audited acquisition
+path to be reused for other research points without changing the evidence logic.
 
-The output is research-only. A rapid-map view is not, by itself, an exact legal
-or historical parcel boundary and must not change scoring.
+The output is research-only. A rapid-map view is historical map context, not an
+exact legal/historical parcel or channel boundary, and must not change scoring.
 """
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright
 
-OUT = Path("out-naro-kozuka")
-LAT = 35.732335
-LON = 139.797859
-ZOOMS = (15, 16, 17)
+OUT = Path(os.environ.get("NARO_OUT", "out-naro-kozuka"))
+LAT = float(os.environ.get("NARO_LAT", "35.732335"))
+LON = float(os.environ.get("NARO_LON", "139.797859"))
+LABEL = os.environ.get("NARO_LABEL", "Kozukappara")
+ZOOMS = tuple(int(x) for x in os.environ.get("NARO_ZOOMS", "15,16,17").split(",") if x.strip())
 BASE = "https://habs.rad.naro.go.jp/habs_map.html"
 
 
@@ -92,7 +92,13 @@ async def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     raw_dir = OUT / "network"
     raw_dir.mkdir(exist_ok=True)
-    report = {"centerLonLat": [LON, LAT], "views": [], "license": "CC BY 2.1 JP; attribution: 農研機構農業環境研究部門", "qualityRule": "Rapid Survey Map rendering is a historical map context layer, not an exact parcel boundary. scoringEffect=none."}
+    report = {
+        "studyLabel": LABEL,
+        "centerLonLat": [LON, LAT],
+        "views": [],
+        "license": "CC BY 2.1 JP; attribution: 農研機構農業環境研究部門",
+        "qualityRule": "Rapid Survey Map rendering is historical map context, not an exact parcel/channel boundary. scoringEffect=none.",
+    }
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True)
@@ -145,7 +151,6 @@ async def main() -> None:
             inspect = await inspect_map(page)
             (OUT / f"inspect-z{zoom}.json").write_text(json.dumps(inspect, ensure_ascii=False, indent=2), encoding="utf-8")
 
-            # Prefer the largest map-like element and capture it separately.
             elements = inspect.get("mapElements") or []
             largest = max(elements, key=lambda e: e.get("w",0)*e.get("h",0), default=None)
             map_capture = None
