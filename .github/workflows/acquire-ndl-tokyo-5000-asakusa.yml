@@ -6,6 +6,7 @@ on:
     branches:
       - research/mlit-l03b-acquisition-20260811
       - agent/research-ci-hardening-20260814
+      - agent/research-acquisition-recovery-20260814
     paths:
       - '.github/workflows/acquire-ndl-tokyo-5000-asakusa.yml'
       - 'research/acquire_ndl_tokyo_5000_asakusa.py'
