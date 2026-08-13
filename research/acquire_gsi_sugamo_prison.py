@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-"""Temporary research-branch entrypoint for the Oyama/Nishihara post-1949 acquisition.
-
-The protected workflow still calls this historical Sugamo filename. The actual
-study implementation is isolated in acquire_gsi_oyama_postmove.py. Restore the
-Sugamo implementation after this acquisition artifact is fixed in Drive.
-"""
+"""Temporary research-branch entrypoint for 1961 Oyama/Nishihara imagery."""
 import asyncio
-from acquire_gsi_oyama_postmove import main
-
+import acquire_gsi_oyama_postmove as study
+study.YEAR_FROM = 1961
+study.YEAR_TO = 1961
+study.PLANNERS = ["国土地理院"]
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(study.main())
