@@ -100,7 +100,8 @@ function publicizeFeature(feature, query, targetCellId, radiiM) {
     'town_chome_only',
     'district_context',
     'historical_toponym_only',
-  ].includes(feature.locationAccuracy);
+    'source_point_reference',
+  ].includes(feature.locationAccuracy) || feature.publicPrecision === 'reference_point_context';
   const coarsePhysical = isCoarsePhysical(feature);
   const explicitAreaContext = feature.geometryRole === 'area_context';
 
@@ -132,9 +133,11 @@ function publicizeFeature(feature, query, targetCellId, radiiM) {
   if (coarseLocation) {
     relationType = feature.locationAccuracy === 'historical_toponym_only'
       ? 'historical_toponym_context'
-      : 'district_context';
+      : feature.locationAccuracy === 'source_point_reference' || feature.publicPrecision === 'reference_point_context'
+        ? 'reference_point_context'
+        : 'district_context';
     geometryRole = geometryRole ?? 'area_context';
-    publicPrecision = feature.locationAccuracy;
+    publicPrecision = feature.publicPrecision ?? feature.locationAccuracy;
     nearestRing = 'context';
     exactTarget = false;
     bufferedTarget = false;
@@ -200,7 +203,7 @@ function buildConvergence(matches) {
   const unresolved = [];
   for (const feature of matches) {
     const isContext = (
-      ['district_context','historical_toponym_context','area_context'].includes(feature.relationType) ||
+      ['district_context','historical_toponym_context','reference_point_context','area_context'].includes(feature.relationType) ||
       feature.geometryRole === 'area_context'
     );
     if (isContext || !COUNTABLE_STATUSES.has(feature.evidenceStatus)) continue;
@@ -245,7 +248,7 @@ function buildConvergence(matches) {
     convergenceStatus = confirmed >= 2 ? 'confirmed' : 'candidate';
   } else if (
     matches.some((f) => (
-      ['district_context','historical_toponym_context','area_context'].includes(f.relationType) ||
+      ['district_context','historical_toponym_context','reference_point_context','area_context'].includes(f.relationType) ||
       f.geometryRole === 'area_context'
     ))
   ) {
