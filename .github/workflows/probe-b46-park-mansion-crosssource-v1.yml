@@ -1,0 +1,47 @@
+name: V10 B46 Park Mansion isolated cross-source probe v1
+
+on:
+  push:
+    branches:
+      - agent/b46-park-mansion-probe-20260815
+    paths:
+      - research/probe_b46_park_mansion_crosssource_v1.py
+      - .github/workflows/probe-b46-park-mansion-crosssource-v1.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --disable-pip-version-check requests lxml pyproj shapely mapbox-vector-tile
+      - name: Run isolated Park Mansion PLATEAU/GSI probe
+        run: python research/probe_b46_park_mansion_crosssource_v1.py
+      - name: Verify fail-closed contract
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s=json.loads(Path('out-b46-park-mansion-crosssource-v1/SUMMARY.json').read_text(encoding='utf-8'))
+          assert s['target']['propertyId']=='BLDG-8bafd187bc1e',s
+          assert s['plateauCandidateCount3FWithin30m']>0,s
+          assert s['gsiBuildingCountWithin30m']>0,s
+          assert s['formalBuildingPolygonsPromoted']==0,s
+          assert s['policy']['scoringEffect']=='none',s
+          print(json.dumps({'plateau3F30m':s['plateauCandidateCount3FWithin30m'],'gsi30m':s['gsiBuildingCountWithin30m'],'selected':(s['selectedHighConfidenceCandidate'] or {}).get('buildingID')},ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v10-b46-park-mansion-crosssource-v1
+          path: |
+            out-b46-park-mansion-crosssource-v1
+            out-b46-park-mansion-plateau-v1
+            out-b46-park-mansion-gsi-vector-v1
+          if-no-files-found: error
+          retention-days: 14
