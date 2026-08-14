@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import hashlib
+import io
 import json
 import os
 import pathlib
@@ -26,18 +27,18 @@ with urllib.request.urlopen(req, timeout=120) as r:
 RAW.write_bytes(data)
 sha = hashlib.sha256(data).hexdigest()
 
-members = []
+outer_members = []
 shp_profiles = []
-with zipfile.ZipFile(RAW) as zf:
-    members = [x.filename for x in zf.infolist() if not x.is_dir()]
-    shp_names = [n for n in members if n.lower().endswith('.shp')]
-    for shp_name in shp_names:
+
+def profile_zip(zf, package_label):
+    names = [x.filename for x in zf.infolist() if not x.is_dir()]
+    for shp_name in [n for n in names if n.lower().endswith('.shp')]:
         base = shp_name[:-4]
         with tempfile.TemporaryDirectory() as td:
             td = pathlib.Path(td)
             for ext in ('.shp','.shx','.dbf','.prj','.cpg'):
                 candidate = base + ext
-                if candidate in members:
+                if candidate in names:
                     (td / pathlib.Path(candidate).name).write_bytes(zf.read(candidate))
             shp_path = td / pathlib.Path(shp_name).name
             reader = shapefile.Reader(str(shp_path), encoding='cp932', encodingErrors='replace')
@@ -47,20 +48,21 @@ with zipfile.ZipFile(RAW) as zf:
                 values = [v for v in rec]
                 text = ' | '.join('' if v is None else str(v) for v in values)
                 if '梅若' in text:
-                    shape = reader.shape(idx)
+                    shp = reader.shape(idx)
                     matching.append({
                         'recordIndex': idx,
                         'attributes': dict(zip(fields, values)),
-                        'shapeType': shape.shapeTypeName,
-                        'bbox': list(shape.bbox) if hasattr(shape, 'bbox') else None,
-                        'points': len(shape.points),
-                        'parts': list(shape.parts),
+                        'shapeType': shp.shapeTypeName,
+                        'bbox': list(getattr(shp, 'bbox', [])) or None,
+                        'points': len(shp.points),
+                        'parts': list(shp.parts),
                     })
             prj = None
             prj_path = td / (pathlib.Path(base).name + '.prj')
             if prj_path.exists():
                 prj = prj_path.read_text(encoding='utf-8', errors='replace')
             shp_profiles.append({
+                'package': package_label,
                 'shpName': shp_name,
                 'shapeType': reader.shapeTypeName,
                 'recordCount': len(reader),
@@ -69,6 +71,19 @@ with zipfile.ZipFile(RAW) as zf:
                 'prj': prj,
                 'umewakaMatches': matching,
             })
+
+with zipfile.ZipFile(RAW) as outer:
+    outer_members = [x.filename for x in outer.infolist() if not x.is_dir()]
+    profile_zip(outer, 'outer')
+    for name in outer_members:
+        if not name.lower().endswith('.zip'):
+            continue
+        nested_bytes = outer.read(name)
+        try:
+            with zipfile.ZipFile(io.BytesIO(nested_bytes)) as nested:
+                profile_zip(nested, name)
+        except zipfile.BadZipFile:
+            pass
 
 report = {
     'project': 'PROJECT_VEIL',
@@ -80,8 +95,8 @@ report = {
     'bytes': len(data),
     'sha256': sha,
     'license': 'CC BY 2.1 JP per Sumida Open Data Portal; attribution/modified-data notice required',
-    'memberCount': len(members),
-    'members': members,
+    'outerMemberCount': len(outer_members),
+    'outerMembers': outer_members,
     'shapefiles': shp_profiles,
     'safeInterpretation': 'Official current ward-park geometry. A park polygon is not an exact event point; use only as facility-site/area context for park-level incident precision.',
 }
@@ -94,6 +109,6 @@ print(json.dumps({
     'umewakaMatches': sum(len(x['umewakaMatches']) for x in shp_profiles),
 }, ensure_ascii=False))
 if not shp_profiles:
-    raise SystemExit('no shapefile in official park ZIP')
+    raise SystemExit('no shapefile after recursive ZIP inspection')
 if sum(len(x['umewakaMatches']) for x in shp_profiles) < 1:
     raise SystemExit('梅若 record not found; fail closed')
