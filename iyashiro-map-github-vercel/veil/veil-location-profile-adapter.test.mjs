@@ -104,6 +104,26 @@ test('coarse physical series is forced to area context and never target-local', 
   assert.equal(r.veil.convergence.independentSeriesCount, 0);
 });
 
+test('source-reference archaeology point is context-only even if indexed in target cell', () => {
+  const r = run([{
+    featureId: 'arch-reference',
+    lane: 'LOST_TABOO',
+    geometry: { type: 'Point', coordinates: [139.68, 35.67] },
+    spatialMatches: baseMatch,
+    locationAccuracy: 'source_point_reference',
+    publicPrecision: 'reference_point_context',
+    evidenceStatus: 'source_backed_review',
+    canonicalSourceIdentity: 'TOKYO_SHINAGAWA_ARCH_0026',
+  }]);
+  const f = r.veil.cards.LOST_TABOO.features[0];
+  assert.equal(f.relationType, 'reference_point_context');
+  assert.equal(f.intersects, false);
+  assert.equal(f.nearestRing, 'context');
+  assert.equal(r.veil.cards.LOST_TABOO.featureCountByRing.target, 0);
+  assert.equal(r.veil.cards.LOST_TABOO.featureCountByRing['100'], 0);
+  assert.equal(r.veil.convergence.independentSeriesCount, 0);
+});
+
 test('source access pending remains distinct from no-hit', () => {
   const r = run([], {
     FOLKLORE: { coverageStatus: 'source_access_pending' },
