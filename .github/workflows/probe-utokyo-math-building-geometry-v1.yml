@@ -1,0 +1,39 @@
+name: V10 UTokyo math building geometry v1
+on:
+  pull_request:
+    paths:
+      - research/probe_utokyo_math_building_geometry_v1.py
+      - .github/workflows/probe-utokyo-math-building-geometry-v1.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --disable-pip-version-check requests shapely pyproj
+      - name: Resolve math building and target distance
+        run: python research/probe_utokyo_math_building_geometry_v1.py
+      - name: Verify fail-closed
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s=json.loads(Path('out-utokyo-math-building-geometry-v1/SUMMARY.json').read_text(encoding='utf-8'))
+          assert s['policy']['SK03GeometryVerified'] is False, s
+          assert s['policy']['formalHistoricalGeometryPromotion'] is False, s
+          assert s['policy']['scoringEffect'] == 'none', s
+          assert s['candidateCount'] >= 1, s
+          print(json.dumps({'selected':s['selected'],'policy':s['policy']},ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v10-utokyo-math-building-geometry-v1
+          path: out-utokyo-math-building-geometry-v1
+          if-no-files-found: error
+          retention-days: 14
