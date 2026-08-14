@@ -28,12 +28,15 @@ jobs:
         env:
           VEIL_DM_PROBE_OUT: veil-kawasaki-dm-probe
 
-      - name: Upload compact probe report only
+      - name: Upload raw DM archives and compact report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: veil-kawasaki-dm-probe-report
-          path: iyashiro-map-github-vercel/veil-kawasaki-dm-probe/kawasaki-dm-probe.json
+          name: veil-kawasaki-dm-probe-bundle
+          path: |
+            iyashiro-map-github-vercel/veil-kawasaki-dm-probe/DM1.zip
+            iyashiro-map-github-vercel/veil-kawasaki-dm-probe/DM2.zip
+            iyashiro-map-github-vercel/veil-kawasaki-dm-probe/kawasaki-dm-probe.json
           if-no-files-found: error
           retention-days: 14
 
