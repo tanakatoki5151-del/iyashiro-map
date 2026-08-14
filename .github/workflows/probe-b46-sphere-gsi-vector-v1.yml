@@ -1,0 +1,54 @@
+name: V10 B46 SPHERE GSI Vector current-building diagnostic v1
+
+on:
+  pull_request:
+    paths:
+      - research/probe_b46_sphere_gsi_vector_v1.py
+      - .github/workflows/probe-b46-sphere-gsi-vector-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check requests mapbox-vector-tile shapely pyproj
+      - name: Probe current GSI Vector tiles around SPHERE
+        run: python research/probe_b46_sphere_gsi_vector_v1.py
+      - name: Verify fail-closed contract
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s=json.loads(Path('out-b46-sphere-gsi-vector-v1/SUMMARY.json').read_text(encoding='utf-8'))
+          assert s['source']['documentedDataAsOf']=='2026-04-01',s
+          assert len(s['tiles'])==9,s
+          assert s['layerStats'],s
+          assert s['nearPolygonCount']>0,s
+          assert s['formalBuildingPolygonsPromoted']==0,s
+          assert s['verifiedGeometryAdded']==0,s
+          assert s['policy']['scoringEffect']=='none',s
+          assert s['policy']['rankingEffect']=='none',s
+          assert s['policy']['automaticExclusionEffect']=='none',s
+          print(json.dumps({
+            'centerTile':s['centerTile'],
+            'layers':list(s['layerStats']),
+            'selectedYDown':s['selectedYDown'],
+            'nearPolygonCount':s['nearPolygonCount'],
+            'likelyBuildingPolygonCount':s['likelyBuildingPolygonCount'],
+          },ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v10-b46-sphere-gsi-vector-v1
+          path: out-b46-sphere-gsi-vector-v1
+          if-no-files-found: error
+          retention-days: 14
