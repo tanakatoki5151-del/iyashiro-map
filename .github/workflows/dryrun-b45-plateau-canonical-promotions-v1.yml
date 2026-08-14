@@ -1,0 +1,49 @@
+name: V10 B45 PLATEAU canonical promotions v1
+
+on:
+  pull_request:
+    paths:
+      - research/dryrun_b45_plateau_canonical_promotions_v1.py
+      - research/fixtures/b41_plateau_sensitive_subset_top2_v1.json
+      - .github/workflows/dryrun-b45-plateau-canonical-promotions-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dryrun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check requests lxml pyproj shapely
+      - name: Re-run PLATEAU promotion gate
+        run: python research/audit_b41_plateau_canonical_promotion_gate_v1.py
+      - name: Run verified-only B45 dry-run
+        run: python research/dryrun_b45_plateau_canonical_promotions_v1.py
+      - name: Verify no class or ranking drift
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s=json.loads(Path('out-b45-plateau-canonical-promotions-v1/SUMMARY.json').read_text(encoding='utf-8'))
+          assert s['sourceFullSensitiveGeometry']['uniqueOsmFeatures']==31918,s
+          assert s['sourceFullSensitiveGeometry']['templeShrineCemeteryRelevantUnique']==30493,s
+          assert s['summary']['formalBuildingsDryRun']==2,s
+          assert s['summary']['comparisons']==6,s
+          assert s['summary']['classChanges']==0,s
+          assert s['summary']['scoreChanges']==0 and s['summary']['rankChanges']==0 and s['summary']['automaticExclusionChanges']==0,s
+          assert s['policy']['decision']=='pass_class_unchanged',s
+          print(json.dumps(s['summary'],ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v10-b45-plateau-canonical-promotions-v1
+          path: out-b45-plateau-canonical-promotions-v1
+          if-no-files-found: error
+          retention-days: 14
