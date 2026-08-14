@@ -5,33 +5,18 @@
     "filename": "osm-sensitive-features-geometry.jsonl.gz",
     "sha256": "8108dad15b108ec1a1654368e7c7dbb4535963f270ec4cf838cb749c3b2bddef",
     "featureCount": 31918,
-    "note": "Subset selected locally from exact frozen full geometry; source baseline unchanged."
+    "note": "Nearest feature per category was selected by a full local scan of the exact frozen baseline; source baseline unchanged."
   },
   "selection": {
-    "method": "top2 per category by minimum distance across PLATEAU 13110-bldg-50079 and current GSI sturdy building near exact address",
+    "method": "global nearest per category across PLATEAU 13110-bldg-50079 and current GSI sturdy building near exact address",
     "categories": ["temple", "shrine", "cemetery"],
     "selectedFeatureIds": {
-      "temple": ["node/10129994430", "node/5964037556"],
-      "shrine": ["node/5921740312", "node/10129994421"],
-      "cemetery": ["way/880838154", "way/163716222"]
+      "temple": "node/10129994430",
+      "shrine": "node/5921740312",
+      "cemetery": "way/880838154"
     }
   },
   "features": [
-    {
-      "featureId": "node/10129994421",
-      "osmType": "node",
-      "osmId": 10129994421,
-      "categories": ["shrine"],
-      "name": "正一位　伊勢丸稲荷大神",
-      "latitude": 35.640358500000005,
-      "longitude": 139.66903680000001,
-      "sourceUrl": "https://www.openstreetmap.org/node/10129994421",
-      "tags": {"amenity": "place_of_worship", "name": "正一位　伊勢丸稲荷大神", "religion": "shinto"},
-      "crs": "EPSG:6677",
-      "geometryType": "Point",
-      "bbox": [-14879.066888012318, -39887.843203525794, -14879.066888012318, -39887.843203525794],
-      "geometry": {"coordinates": [-14879.066888012318, -39887.843203525794]}
-    },
     {
       "featureId": "node/10129994430",
       "osmType": "node",
@@ -41,7 +26,13 @@
       "latitude": 35.6347849,
       "longitude": 139.66430640000002,
       "sourceUrl": "https://www.openstreetmap.org/node/10129994430",
-      "tags": {"amenity": "place_of_worship", "name": "宗圓寺", "religion": "buddhist", "wikidata": "Q97172090", "wikipedia": "ja:宗円寺 (世田谷区)"},
+      "tags": {
+        "amenity": "place_of_worship",
+        "name": "宗圓寺",
+        "religion": "buddhist",
+        "wikidata": "Q97172090",
+        "wikipedia": "ja:宗円寺 (世田谷区)"
+      },
       "crs": "EPSG:6677",
       "geometryType": "Point",
       "bbox": [-15308.5259033482, -40505.45984540005, -15308.5259033482, -40505.45984540005],
@@ -56,41 +47,19 @@
       "latitude": 35.632606200000005,
       "longitude": 139.67033320000002,
       "sourceUrl": "https://www.openstreetmap.org/node/5921740312",
-      "tags": {"amenity": "place_of_worship", "name": "野沢稲荷神社", "religion": "shinto", "source": "survey", "wikidata": "Q106852465", "wikimedia_commons": "Category:Nozawa Inari shrine", "wikipedia": "ja:野沢稲荷神社"},
+      "tags": {
+        "amenity": "place_of_worship",
+        "name": "野沢稲荷神社",
+        "religion": "shinto",
+        "source": "survey",
+        "wikidata": "Q106852465",
+        "wikimedia_commons": "Category:Nozawa Inari shrine",
+        "wikipedia": "ja:野沢稲荷神社"
+      },
       "crs": "EPSG:6677",
       "geometryType": "Point",
       "bbox": [-14763.087437768412, -40748.089046806475, -14763.087437768412, -40748.089046806475],
       "geometry": {"coordinates": [-14763.087437768412, -40748.089046806475]}
-    },
-    {
-      "featureId": "node/5964037556",
-      "osmType": "node",
-      "osmId": 5964037556,
-      "categories": ["temple"],
-      "name": "龍雲禅寺",
-      "latitude": 35.63280820000001,
-      "longitude": 139.67222610000002,
-      "sourceUrl": "https://www.openstreetmap.org/node/5964037556",
-      "tags": {"amenity": "place_of_worship", "name": "龍雲禅寺", "religion": "buddhist"},
-      "crs": "EPSG:6677",
-      "geometryType": "Point",
-      "bbox": [-14591.608705912256, -40725.96141098668, -14591.608705912256, -40725.96141098668],
-      "geometry": {"coordinates": [-14591.608705912256, -40725.96141098668]}
-    },
-    {
-      "featureId": "way/163716222",
-      "osmType": "way",
-      "osmId": 163716222,
-      "categories": ["cemetery"],
-      "name": null,
-      "latitude": 35.634736340001844,
-      "longitude": 139.66914490046597,
-      "sourceUrl": "https://www.openstreetmap.org/way/163716222",
-      "tags": {"landuse": "cemetery"},
-      "crs": "EPSG:6677",
-      "geometryType": "Polygon",
-      "bbox": [-14898.461067603266, -40538.58714199476, -14842.17590249131, -40484.591991387286],
-      "geometry": {"rings": [{"role": "outer", "coordinates": [[-14897.464835160468,-40491.60133927661],[-14887.972115877885,-40484.591991387286],[-14861.530408420008,-40497.38746666051],[-14842.17590249131,-40519.844353513414],[-14848.179548591858,-40538.58714199476],[-14867.48549746889,-40536.389041500915],[-14898.461067603266,-40518.68549494443],[-14897.464835160468,-40491.60133927661]]}]}
     },
     {
       "featureId": "way/880838154",
@@ -98,14 +67,32 @@
       "osmId": 880838154,
       "categories": ["cemetery"],
       "name": null,
-      "latitude": 35.633784218984694,
-      "longitude": 139.6674675794982,
+      "latitude": 35.63445276321675,
+      "longitude": 139.66375604797912,
       "sourceUrl": "https://www.openstreetmap.org/way/880838154",
       "tags": {"landuse": "cemetery"},
       "crs": "EPSG:6677",
       "geometryType": "Polygon",
-      "bbox": [-15051.052326001091,-40659.749992816985,-14967.589439882237,-40544.88479744731],
-      "geometry": {"rings": [{"role": "outer", "coordinates": [[-14983.54721115089,-40544.88479744731],[-14971.619914439834,-40562.47494994966],[-14967.589439882237,-40580.1819754284],[-14970.081633452867,-40612.45337006184],[-14989.562691319223,-40644.473510822805],[-15022.573589794074,-40659.749992816985],[-15051.052326001091,-40637.699752837405],[-15030.487123474482,-40604.185018788434],[-15011.343972943494,-40569.16252544576],[-14983.54721115089,-40544.88479744731]]}]}
+      "bbox": [-15376.027797940651, -40564.28451835518, -15340.840359839884, -40520.15892653664],
+      "geometry": {
+        "rings": [
+          {
+            "role": "outer",
+            "coordinates": [
+              [-15360.474411821682, -40520.15892653664],
+              [-15376.027797940651, -40532.202539567654],
+              [-15372.841897919898, -40549.18210863849],
+              [-15368.856532456633, -40549.000385573956],
+              [-15364.526511790733, -40564.28451835518],
+              [-15346.331108712222, -40559.03506579724],
+              [-15350.345868002607, -40544.738865734435],
+              [-15340.840359839884, -40541.959513779555],
+              [-15342.475507853153, -40523.77336387926],
+              [-15360.474411821682, -40520.15892653664]
+            ]
+          }
+        ]
+      }
     }
   ]
 }
