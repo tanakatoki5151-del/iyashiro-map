@@ -1,0 +1,57 @@
+name: V10 B41 building physical plausibility v1
+
+on:
+  pull_request:
+    paths:
+      - research/audit_b41_building_physical_plausibility_v1.py
+      - .github/workflows/audit-b41-building-physical-plausibility-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run physical plausibility gate
+        run: python research/audit_b41_building_physical_plausibility_v1.py
+
+      - name: Verify fail-closed contract
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          s = json.loads(Path("out-b41-physical-plausibility-v1/SUMMARY.json").read_text(encoding="utf-8"))
+          assert s["counts"]["targets"] == 6, s
+          assert s["counts"]["selectedCandidatesRejectedAsCompleteFootprint"] >= 3, s
+          assert s["counts"]["formalBuildingPolygonsPromoted"] == 0, s
+          assert s["policy"]["verifiedGeometryAdded"] == 0, s
+          assert s["policy"]["scoringEffect"] == "none", s
+          assert s["policy"]["rankingEffect"] == "none", s
+          assert s["policy"]["automaticExclusionEffect"] == "none", s
+          items = {x["propertyId"]: x for x in s["items"]}
+          assert items["BLDG-6583382c8322"]["selected"]["physicalStatus"] == "too_small_for_complete_footprint", items
+          assert items["BLDG-edf6c2448f9e"]["selected"]["physicalStatus"] == "too_small_for_complete_footprint", items
+          assert items["BLDG-c404c81c08a5"]["selected"]["physicalStatus"] == "too_small_for_complete_footprint", items
+          assert items["BLDG-4e6c9a14c783"]["selected"]["physicalStatus"] == "physically_plausible_only_identity_unresolved", items
+          print(json.dumps(s["counts"], ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload audit evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: v10-b41-building-physical-plausibility-v1
+          path: out-b41-physical-plausibility-v1
+          if-no-files-found: error
+          retention-days: 14
