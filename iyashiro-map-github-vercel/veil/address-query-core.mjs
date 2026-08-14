@@ -217,7 +217,7 @@ function convergenceForFeatures(internalMatches) {
     seriesId: group.independenceGroup,
     featureIds: [...new Set(group.featureIds)],
     lanes: [...group.lanes].sort(),
-    status: group.confirmimed ? "confirmed" : group.candidate ? "candidate" : "context_only",
+    status: group.confirmed ? "confirmed" : group.candidate ? "candidate" : "context_only",
   }));
   const confirmed = series.filter((s) => s.status === "confirmed").length;
   const candidate = series.filter((s) => s.status === "candidate").length;
