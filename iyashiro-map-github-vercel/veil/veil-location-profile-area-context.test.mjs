@@ -28,7 +28,7 @@ const resolver = {
   candidateCells() { return [{ cellId: 'g245-268' }]; },
 };
 
-test('explicit area_context remains context even when spatial index match says intersects', () => {
+test('source-reference area context stays non-target even when spatial index says intersects', () => {
   const featureStore = createVeilFeatureStore([{
     featureId: 'VEIL-TOKYO-SHINAGAWA-ARCH-0026-R01',
     lane: 'LOST_TABOO',
@@ -44,7 +44,8 @@ test('explicit area_context remains context even when spatial index match says i
   }]);
   const result = buildVeilLayerForLocationProfile({ queryAnchor, resolver, featureStore });
   const feature = result.veil.cards.LOST_TABOO.features[0];
-  assert.equal(feature.relationType, 'area_context');
+  assert.equal(feature.relationType, 'reference_point_context');
+  assert.equal(feature.publicPrecision, 'reference_point_context');
   assert.equal(feature.nearestRing, 'context');
   assert.equal(feature.intersects, false);
   assert.equal(result.veil.cards.LOST_TABOO.featureCountByRing.target, 0);
