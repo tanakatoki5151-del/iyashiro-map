@@ -1,0 +1,48 @@
+name: V10 B41 formal building promotions v1
+
+on:
+  pull_request:
+    paths:
+      - research/package_b41_formal_building_promotions_v1.py
+      - .github/workflows/package-b41-formal-building-promotions-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check requests lxml pyproj shapely
+      - name: Re-run strict cross-source gate
+        run: PYTHONPATH=. python research/audit_b41_crosssource_promotion_gate_v2.py
+      - name: Package formal verified delta
+        run: PYTHONPATH=. python research/package_b41_formal_building_promotions_v1.py
+      - name: Verify promotion package
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          g=json.loads(Path('out-b41-formal-building-promotions-v1/verified-building-polygons-additions-v1.geojson').read_text(encoding='utf-8'))
+          p=json.loads(Path('out-b41-formal-building-promotions-v1/PROVENANCE.json').read_text(encoding='utf-8'))
+          assert len(g['features']) == 2, g
+          assert p['formalPromotions'] == 2, p
+          assert {f['properties']['propertyId'] for f in g['features']} == {'BLDG-edf6c2448f9e','BLDG-4e6c9a14c783'}, g
+          assert all(f['properties']['status']=='verified_for_v10_spatial_screening' for f in g['features']), g
+          assert all(f['properties']['geometryRole']=='building_footprint_not_parcel' for f in g['features']), g
+          assert p['policy']['scoreChange'] is False and p['policy']['rankChange'] is False and p['policy']['automaticExclusionChange'] is False, p
+          print(json.dumps({'formalPromotions':p['formalPromotions'],'ids':[f['properties']['propertyId'] for f in g['features']]},ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v10-b41-formal-building-promotions-v1
+          path: out-b41-formal-building-promotions-v1
+          if-no-files-found: error
+          retention-days: 14
