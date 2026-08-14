@@ -1,0 +1,43 @@
+name: V10 Ichibancho official site exact-cell v1
+on:
+  pull_request:
+    paths:
+      - research/audit_ichibancho_site_exact_cell_v1.py
+      - .github/workflows/audit-ichibancho-site-exact-cell-v1.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --disable-pip-version-check playwright shapely pyproj
+          python -m playwright install --with-deps chromium
+      - name: Query official Tokyo archaeology WFS and exact cell
+        run: python research/audit_ichibancho_site_exact_cell_v1.py
+      - name: Verify fail-closed
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s=json.loads(Path('out-ichibancho-site-exact-cell-v1/SUMMARY.json').read_text(encoding='utf-8'))
+          assert s['acceptedTerms'] is True, s
+          assert s['policy']['officialSiteGeometryIsNotExactGraveGeometry'] is True, s
+          assert s['policy']['formalGraveGeometryPromotion'] is False, s
+          assert s['policy']['scoringEffect'] == 'none', s
+          assert s['selectedSiteId'], s
+          print(json.dumps({'siteId':s['selectedSiteId'],'siteToCenterM':s['siteToCellCenterDistanceM'],'siteToExactCellM':s['siteToExactCellDistanceM'],'bufferTests':s['bufferTests'],'decision':s['decision']},ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v10-ichibancho-site-exact-cell-v1
+          path: out-ichibancho-site-exact-cell-v1
+          if-no-files-found: error
+          retention-days: 14
