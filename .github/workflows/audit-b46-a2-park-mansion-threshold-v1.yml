@@ -1,0 +1,58 @@
+name: V10 B46 A2 Park Mansion threshold audit v1
+
+on:
+  pull_request:
+    paths:
+      - research/probe_b46_a2_park_mansion_crosssource_v1.py
+      - research/audit_b46_a2_park_mansion_threshold_v1.py
+      - research/fixtures/b46_a2_park_mansion_sensitive_subset_v1.json
+      - .github/workflows/audit-b46-a2-park-mansion-threshold-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check requests lxml pyproj shapely mapbox-vector-tile
+      - name: Rebuild A2 public-source geometry probe
+        run: python research/probe_b46_a2_park_mansion_crosssource_v1.py
+      - name: Audit A2 threshold
+        run: python research/audit_b46_a2_park_mansion_threshold_v1.py
+      - name: Verify decision-only closure contract
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s=json.loads(Path('out-b46-a2-park-mansion-threshold-v1/SUMMARY.json').read_text(encoding='utf-8'))
+          assert all(s['gates'].values()),s['gates']
+          assert s['thresholdDecision']['classChanged'] is False,s['thresholdDecision']
+          assert s['thresholdDecision']['plateauDistanceM'] >= 500,s['thresholdDecision']
+          assert s['thresholdDecision']['gsiDistanceM'] >= 500,s['thresholdDecision']
+          assert s['thresholdDecision']['osmDistanceM'] >= 500,s['thresholdDecision']
+          assert s['formalBuildingPolygonsPromoted']==0,s
+          assert s['policy']['decisionStatus']=='D-DONE',s
+          assert s['policy']['scoringEffect']=='none',s
+          assert s['policy']['rankingEffect']=='none',s
+          assert s['policy']['automaticExclusionEffect']=='none',s
+          print(json.dumps({
+            'lead':s['leadPlateau'],
+            'threshold':s['thresholdDecision'],
+            'formalExistingGate':s['formalExistingGateCheck'],
+            'formalPromotion':s['formalBuildingPolygonsPromoted']
+          },ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v10-b46-a2-park-mansion-threshold-v1
+          path: out-b46-a2-park-mansion-threshold-v1
+          if-no-files-found: error
+          retention-days: 14
