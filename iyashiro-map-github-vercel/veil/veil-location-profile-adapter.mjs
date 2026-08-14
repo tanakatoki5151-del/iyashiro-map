@@ -58,7 +58,9 @@ export function createVeilFeatureStore(features) {
 }
 
 function validateQueryAnchor(anchor) {
-  const required = ['anchorId','anchorType','lat','lng','precisionClass','source','acquiredAt'];
+  const required = [
+    'anchorId','anchorType','lat','lng','precisionClass','source','sourceDate','acquiredAt',
+  ];
   for (const key of required) {
     if (anchor?.[key] === undefined || anchor?.[key] === null || anchor?.[key] === '') {
       throw new Error(`queryAnchor.${key} required`);
