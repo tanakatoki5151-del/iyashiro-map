@@ -1,0 +1,44 @@
+name: V10 B41 PLATEAU canonical promotion gate v1
+
+on:
+  pull_request:
+    paths:
+      - research/audit_b41_plateau_canonical_promotion_gate_v1.py
+      - .github/workflows/audit-b41-plateau-canonical-promotion-gate-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check requests lxml pyproj shapely
+      - name: Run PLATEAU-canonical gate
+        run: python research/audit_b41_plateau_canonical_promotion_gate_v1.py
+      - name: Verify fail-closed contract
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s=json.loads(Path('out-b41-plateau-canonical-promotion-gate-v1/SUMMARY.json').read_text(encoding='utf-8'))
+          assert len(s['items'])==2,s
+          assert s['formalPromotionsPerformed']==0,s
+          assert s['policy']['scoreChanges']==0 and s['policy']['rankChanges']==0 and s['policy']['automaticExclusionChanges']==0,s
+          for x in s['items']:
+            assert x['promotionReady']==all(x['checks'].values()),x
+          print(json.dumps({x['propertyId']:{'ready':x['promotionReady'],'rank':x['plateau']['physicallyPlausibleRankWithin60m'],'overlapOsm':x['crossSourcePartialControl']['overlapOfOsmPartial'],'areaRatio':x['crossSourcePartialControl']['osmToPlateauAreaRatio']} for x in s['items']},ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v10-b41-plateau-canonical-promotion-gate-v1
+          path: out-b41-plateau-canonical-promotion-gate-v1
+          if-no-files-found: error
+          retention-days: 14
