@@ -231,7 +231,7 @@ def main():
             "scoringEffect": "none",
             "rankingEffect": "none",
             "automaticExclusionEffect": "none",
-            "nextAutonomousBuilding": null,
+            "nextAutonomousBuilding": None,
             "autonomousBuildingLane": "complete_if_this_audit_passes",
         },
     }
