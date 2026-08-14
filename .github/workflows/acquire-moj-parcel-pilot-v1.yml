@@ -1,0 +1,55 @@
+name: V10 MoJ parcel pilot v1
+
+on:
+  pull_request:
+    paths:
+      - research/acquire_moj_parcel_pilot_v1.py
+      - research/inputs/v10-verified-building-polygons-v1.geojson
+      - .github/workflows/acquire-moj-parcel-pilot-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check requests shapely pyproj
+
+      - name: Acquire and join MoJ-derived parcels
+        run: python research/acquire_moj_parcel_pilot_v1.py
+
+      - name: Verify fail-closed contract
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          summary = json.loads(Path("out-moj-parcel-pilot-v1/SUMMARY.json").read_text(encoding="utf-8"))
+          assert summary["counts"]["targets"] == 2, summary
+          assert summary["counts"]["formalParcelPromotions"] == 0, summary
+          assert summary["policy"]["parcelLegalBoundaryClaim"] == "none", summary
+          assert summary["policy"]["scoringEffect"] == "none", summary
+          assert summary["policy"]["rankingEffect"] == "none", summary
+          assert summary["policy"]["automaticExclusionEffect"] == "none", summary
+          print(json.dumps(summary, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload parcel pilot evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: v10-moj-parcel-pilot-v1
+          path: out-moj-parcel-pilot-v1
+          if-no-files-found: error
+          retention-days: 14
