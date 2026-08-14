@@ -1,0 +1,113 @@
+name: VEIL Network Ingest
+
+on:
+  push:
+    branches:
+      - project-veil-address-core-v1
+    paths:
+      - 'iyashiro-map-github-vercel/veil/tools/network-acquire.mjs'
+      - 'iyashiro-map-github-vercel/veil/tools/analyze-shapefile-zips.py'
+      - 'iyashiro-map-github-vercel/veil/tools/analyze-csv-payloads.py'
+      - '.github/workflows/veil-network-ingest.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquire-and-profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: iyashiro-map-github-vercel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Acquire official payloads and scan Yokohama CKAN
+        run: node veil/tools/network-acquire.mjs
+        env:
+          VEIL_NETWORK_OUT: veil-network-out
+
+      - name: Profile CSV payloads
+        if: always()
+        run: python veil/tools/analyze-csv-payloads.py veil-network-out
+
+      - name: Inventory shapefile ZIPs without semantic promotion
+        if: always()
+        run: python veil/tools/analyze-shapefile-zips.py veil-network-out
+
+      - name: Upload compact reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veil-network-reports
+          path: iyashiro-map-github-vercel/veil-network-out/reports/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Tokyo raw payloads
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veil-network-raw-tokyo
+          path: |
+            iyashiro-map-github-vercel/veil-network-out/raw/nakano_opendata_6000780.csv
+            iyashiro-map-github-vercel/veil-network-out/raw/maizoubunkazai_20260330.zip
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload Kawasaki raw payloads
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veil-network-raw-kawasaki
+          path: |
+            iyashiro-map-github-vercel/veil-network-out/raw/1kawasakiSHP2500.zip
+            iyashiro-map-github-vercel/veil-network-out/raw/2saiwaiSHP2500.zip
+            iyashiro-map-github-vercel/veil-network-out/raw/3nakaharaSHP2500.zip
+            iyashiro-map-github-vercel/veil-network-out/raw/4takatuSHP2500.zip
+            iyashiro-map-github-vercel/veil-network-out/raw/6tamaSHP2500.zip
+            iyashiro-map-github-vercel/veil-network-out/raw/5miyamaeSHP2500.zip
+            iyashiro-map-github-vercel/veil-network-out/raw/7asaoSHP2500.zip
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 14
+
+      - name: Fail closed if required acquisition/discovery gates are incomplete
+        if: always()
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const p = 'veil-network-out/reports/run-summary.json';
+          if (!fs.existsSync(p)) {
+            console.error('run-summary.json missing');
+            process.exit(1);
+          }
+          const s = JSON.parse(fs.readFileSync(p, 'utf8'));
+          const problems = [];
+          if (s.acquired !== 9) problems.push(`required downloads acquired=${s.acquired}/9`);
+          if (s.failed !== 0) problems.push(`required downloads failed=${s.failed}`);
+          if (s.yokohama?.queryErrors !== 0) problems.push(`Yokohama CKAN queryErrors=${s.yokohama?.queryErrors}`);
+          const shpPath = 'veil-network-out/reports/shapefile-inventory.json';
+          if (!fs.existsSync(shpPath)) {
+            problems.push('shapefile-inventory.json missing');
+          } else {
+            const inv = JSON.parse(fs.readFileSync(shpPath, 'utf8'));
+            if (inv.summary?.zipCount !== 8) problems.push(`shapefile zipCount=${inv.summary?.zipCount}/8`);
+            const archiveErrors = (inv.summary?.zips || []).filter(z => (z.errors || []).length > 0);
+            if (archiveErrors.length) problems.push(`shapefile archive errors=${archiveErrors.length}`);
+          }
+          if (problems.length) {
+            console.error('VEIL_FAIL_CLOSED=' + JSON.stringify(problems));
+            process.exit(1);
+          }
+          console.log('VEIL_NETWORK_GATES=PASS');
+          NODE
