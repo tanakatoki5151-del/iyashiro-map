@@ -102,16 +102,25 @@ function publicizeFeature(feature, query, targetCellId, radiiM) {
     'historical_toponym_only',
   ].includes(feature.locationAccuracy);
   const coarsePhysical = isCoarsePhysical(feature);
+  const explicitAreaContext = feature.geometryRole === 'area_context';
 
-  let exactTarget = !coarseLocation && !coarsePhysical && Boolean(spatial?.intersectsCell);
+  let exactTarget = (
+    !coarseLocation &&
+    !coarsePhysical &&
+    !explicitAreaContext &&
+    Boolean(spatial?.intersectsCell)
+  );
   let bufferedTarget = (
     !coarseLocation &&
     !coarsePhysical &&
+    !explicitAreaContext &&
     !exactTarget &&
     Boolean(spatial?.errorBandIntersectsCell)
   );
   const radius = nearestDistanceRing(distanceMeters, radiiM);
-  const contextApplies = (coarseLocation || coarsePhysical) && (Boolean(spatial) || radius !== null);
+  const contextApplies = (
+    coarseLocation || coarsePhysical || explicitAreaContext
+  ) && (Boolean(spatial) || radius !== null);
   if (!exactTarget && !bufferedTarget && radius === null && !contextApplies) return null;
 
   let relationType = exactTarget ? 'intersects' : bufferedTarget ? 'buffer_intersects' : 'distance_only';
@@ -136,6 +145,15 @@ function publicizeFeature(feature, query, targetCellId, radiiM) {
     relationType = 'area_context';
     spatialInterpretation = 'area_context';
     publicPrecision = 'area_context';
+    nearestRing = 'context';
+    exactTarget = false;
+    bufferedTarget = false;
+  }
+
+  if (explicitAreaContext && !coarseLocation && !coarsePhysical) {
+    relationType = 'area_context';
+    spatialInterpretation = spatialInterpretation ?? 'area_context';
+    publicPrecision = publicPrecision ?? 'area_context';
     nearestRing = 'context';
     exactTarget = false;
     bufferedTarget = false;
