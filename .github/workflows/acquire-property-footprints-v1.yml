@@ -41,7 +41,7 @@ jobs:
           assert summary["counts"]["parcelPolygonsPromoted"] == 0, summary
           assert summary["policy"]["scoringEffect"] == "none", summary
           assert summary["policy"]["rankingEffect"] == "none", summary
-          assert summary["policy"]["autoExclusionEffect"] == "none", summary
+          assert summary["policy"]["automaticExclusionEffect"] == "none", summary
           print(json.dumps(summary, ensure_ascii=False, indent=2))
           PY
 
