@@ -9,6 +9,7 @@ const anchor = {
   lng: 139.68,
   precisionClass: 'address_point',
   source: 'fixture',
+  sourceDate: '2026-08-15',
   acquiredAt: '2026-08-15T00:00:00Z',
   uncertaintyMeters: 20,
   cellId: 'g1-1',
@@ -173,4 +174,13 @@ test('current memorial cannot be asserted as historical original', () => {
     historicalOriginalLocation: true,
     evidenceStatus: 'source_backed_review',
   }]), /historical original/);
+});
+
+test('Global Spatial Contract sourceDate is required on queryAnchor', () => {
+  const { sourceDate, ...withoutSourceDate } = anchor;
+  assert.throws(() => buildVeilLayerForLocationProfile({
+    queryAnchor: withoutSourceDate,
+    resolver,
+    featureStore: createVeilFeatureStore([]),
+  }), /queryAnchor\.sourceDate required/);
 });
