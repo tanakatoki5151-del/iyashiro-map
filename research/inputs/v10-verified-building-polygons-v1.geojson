@@ -1,0 +1,63 @@
+{
+  "type": "FeatureCollection",
+  "name": "V10 verified building polygons v1",
+  "generatedAt": "2026-08-14T23:20:00+09:00",
+  "scope": "V10 only",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "propertyId": "BLDG-7331c4ac78c5",
+        "buildingName": "グレースコート東が丘",
+        "address": "東京都目黒区東が丘1丁目12-8",
+        "geometryRole": "building_footprint_not_parcel",
+        "verificationStatus": "verified_for_v10_spatial_screening",
+        "verifiedAt": "2026-08-14",
+        "osmRef": "way/688689498",
+        "osmVersion": 1,
+        "osmTimestamp": "2019-05-08T16:25:35Z",
+        "osmTags": "building=yes",
+        "propertyBuilt": "2007-12",
+        "gsiAerialPeriod": "2019年6月～11月",
+        "topology": "closed_simple_polygon_no_holes",
+        "approximateAreaSquareMeters": 96.64,
+        "identityEvidence": "Mapion+Yahoo+IESHIL+LIFULL+GSI address points inside; Shamaison official map point 3.057m outside at south access side",
+        "shapeEvidence": "GSI seamless latest aerial period 2019-06..11 roof alignment QA",
+        "sourceArtifactSha256": "c392bb98b40e7a71f6046a0ed5b5bcefbbbc7fc909e3b1588a976e29c0ac3580",
+        "scoringEffect": "eligible_for_verified_only_join_no_score_change_until_recalc"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[139.6704232,35.6296428],[139.6703964,35.6295817],[139.6705144,35.6295511],[139.6705466,35.6296253],[139.6704769,35.6296472],[139.6704232,35.6296428]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "propertyId": "BLDG-f2a532eb6c9c",
+        "buildingName": "スチューデントハイツ代々木上原",
+        "address": "東京都渋谷区大山町47-15",
+        "geometryRole": "building_footprint_not_parcel",
+        "verificationStatus": "verified_for_v10_spatial_screening",
+        "verifiedAt": "2026-08-14",
+        "osmRef": "way/1462905272",
+        "osmVersion": 1,
+        "osmTimestamp": "2025-12-30T19:04:14Z",
+        "osmTags": "building=yes",
+        "propertyBuilt": "2003-03",
+        "propertyStructure": "RC 3F 22 units",
+        "gsiAerialPeriod": "2019年6月～11月",
+        "topology": "closed_simple_polygon_no_holes",
+        "approximateAreaSquareMeters": 152.359,
+        "identityEvidence": "Nasic official building page confirms name/address/build year; GSI exact-address point 4.358m outside east; Nasic official map point 13.308m outside south access side",
+        "shapeEvidence": "GSI seamless latest aerial period 2019-06..11 roof alignment QA; 152.359㎡ footprint is consistent with 3F/22 units around 20㎡",
+        "sourceArtifactSha256": "c392bb98b40e7a71f6046a0ed5b5bcefbbbc7fc909e3b1588a976e29c0ac3580",
+        "scoringEffect": "eligible_for_verified_only_join_no_score_change_until_recalc"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[139.6781707,35.6685969],[139.6780616,35.6686837],[139.6781254,35.6687389],[139.6781911,35.6686799],[139.6782248,35.6687021],[139.6782404,35.6687021],[139.678259,35.668721],[139.6782834,35.6686903],[139.6782689,35.6686733],[139.6782718,35.6686634],[139.6781707,35.6685969]]]
+      }
+    }
+  ]
+}
