@@ -1,0 +1,60 @@
+name: V10 B46 SPHERE cross-source threshold audit v1
+
+on:
+  pull_request:
+    paths:
+      - research/audit_b46_sphere_crosssource_threshold_v1.py
+      - research/probe_b46_sphere_plateau_v1.py
+      - research/probe_b46_sphere_gsi_vector_v1.py
+      - research/fixtures/b46_sphere_sensitive_subset_v1.json
+      - .github/workflows/audit-b46-sphere-crosssource-threshold-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check requests lxml pyproj shapely mapbox-vector-tile
+      - name: Rebuild public-source SPHERE probes
+        run: |
+          python research/probe_b46_sphere_plateau_v1.py
+          python research/probe_b46_sphere_gsi_vector_v1.py
+      - name: Audit cross-source identity and threshold
+        run: python research/audit_b46_sphere_crosssource_threshold_v1.py
+      - name: Verify fail-closed decision contract
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s=json.loads(Path('out-b46-sphere-crosssource-threshold-v1/SUMMARY.json').read_text(encoding='utf-8'))
+          assert all(s['gates'].values()),s['gates']
+          assert s['thresholdDecision']['plateauClass']=='within_preference',s['thresholdDecision']
+          assert s['thresholdDecision']['gsiClass']=='within_preference',s['thresholdDecision']
+          assert not s['thresholdDecision']['classChangedFrom500mPreference'],s['thresholdDecision']
+          assert s['formalBuildingPolygonsPromoted']==0,s
+          assert s['policy']['scoringEffect']=='none',s
+          assert s['policy']['rankingEffect']=='none',s
+          assert s['policy']['automaticExclusionEffect']=='none',s
+          print(json.dumps({
+            'candidate':s['currentPlateauCandidate']['buildingID'],
+            'plateauMarginM':s['thresholdDecision']['plateauMarginM'],
+            'gsiMarginM':s['thresholdDecision']['gsiMarginM'],
+            'attributeApi':s['plateauAttributeApi']['status'],
+            'formalPromotion':s['formalBuildingPolygonsPromoted'],
+          },ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v10-b46-sphere-crosssource-threshold-v1
+          path: out-b46-sphere-crosssource-threshold-v1
+          if-no-files-found: error
+          retention-days: 14
