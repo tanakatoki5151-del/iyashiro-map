@@ -1,0 +1,111 @@
+{
+  "schemaVersion": "v10-b46-sphere-sensitive-subset-v1",
+  "sourceFullGeometry": {
+    "driveId": "1u1mQFHPMiPm25LnFlNoqSUYwdqFnsfrN",
+    "filename": "osm-sensitive-features-geometry.jsonl.gz",
+    "sha256": "8108dad15b108ec1a1654368e7c7dbb4535963f270ec4cf838cb749c3b2bddef",
+    "featureCount": 31918,
+    "note": "Subset selected locally from the exact frozen full geometry; no source mutation."
+  },
+  "selection": {
+    "method": "top2 per category by minimum distance across PLATEAU candidate 13113-bldg-2503209 and current GSI sturdy-building polygon near SPHERE",
+    "categories": ["temple", "shrine", "cemetery"],
+    "selectedFeatureIds": {
+      "temple": ["node/603920702", "node/1935012580"],
+      "shrine": ["node/2244671842", "node/10123420292"],
+      "cemetery": ["way/115447267", "way/1225642369"]
+    }
+  },
+  "features": [
+    {
+      "featureId": "node/603920702",
+      "osmType": "node",
+      "osmId": 603920702,
+      "categories": ["temple"],
+      "name": "應慶寺",
+      "latitude": 35.6704431,
+      "longitude": 139.68593180000002,
+      "sourceUrl": "https://www.openstreetmap.org/node/603920702",
+      "tags": {"amenity": "place_of_worship", "denomination:ja": "浄土真宗", "name": "應慶寺", "name:ja": "應慶寺", "religion": "buddhist"},
+      "crs": "EPSG:6677",
+      "geometryType": "Point",
+      "bbox": [-13344.011011132201, -36552.63317131438, -13344.011011132201, -36552.63317131438],
+      "geometry": {"coordinates": [-13344.011011132201, -36552.63317131438]}
+    },
+    {
+      "featureId": "node/1935012580",
+      "osmType": "node",
+      "osmId": 1935012580,
+      "categories": ["temple"],
+      "name": "椿森神社",
+      "latitude": 35.6714318,
+      "longitude": 139.68562550000001,
+      "sourceUrl": "https://www.openstreetmap.org/node/1935012580",
+      "tags": {"amenity": "place_of_worship", "name": "椿森神社", "name:ja": "椿森神社", "religion": "buddhist", "source": "Bing 2010"},
+      "crs": "EPSG:6677",
+      "geometryType": "Point",
+      "bbox": [-13371.574956065519, -36442.90323788199, -13371.574956065519, -36442.90323788199],
+      "geometry": {"coordinates": [-13371.574956065519, -36442.90323788199]}
+    },
+    {
+      "featureId": "node/2244671842",
+      "osmType": "node",
+      "osmId": 2244671842,
+      "categories": ["shrine"],
+      "name": "代々木八幡宮",
+      "latitude": 35.67199,
+      "longitude": 139.68897420000002,
+      "sourceUrl": "https://www.openstreetmap.org/node/2244671842",
+      "tags": {"amenity": "place_of_worship", "name": "代々木八幡宮", "name:en": "Yoyogi Hachiman", "religion": "shinto", "source": "Bing;survey", "website": "https://yoyogihachimangu.or.jp/", "wheelchair": "yes", "wikidata": "Q11378221"},
+      "crs": "EPSG:6677",
+      "geometryType": "Point",
+      "bbox": [-13068.335361138441, -36381.42600798942, -13068.335361138441, -36381.42600798942],
+      "geometry": {"coordinates": [-13068.335361138441, -36381.42600798942]}
+    },
+    {
+      "featureId": "node/10123420292",
+      "osmType": "node",
+      "osmId": 10123420292,
+      "categories": ["shrine"],
+      "name": "白玉稲荷",
+      "latitude": 35.676453800000004,
+      "longitude": 139.68259270000001,
+      "sourceUrl": "https://www.openstreetmap.org/node/10123420292",
+      "tags": {"amenity": "place_of_worship", "name": "白玉稲荷", "religion": "shinto"},
+      "crs": "EPSG:6677",
+      "geometryType": "Point",
+      "bbox": [-13645.271191119758, -35885.335555332014, -13645.271191119758, -35885.335555332014],
+      "geometry": {"coordinates": [-13645.271191119758, -35885.335555332014]}
+    },
+    {
+      "featureId": "way/115447267",
+      "osmType": "way",
+      "osmId": 115447267,
+      "categories": ["cemetery"],
+      "name": null,
+      "latitude": 35.67110449500961,
+      "longitude": 139.68920697748158,
+      "sourceUrl": "https://www.openstreetmap.org/way/115447267",
+      "tags": {"landuse": "cemetery"},
+      "crs": "EPSG:6677",
+      "geometryType": "Polygon",
+      "bbox": [-13078.235004123457, -36514.473441372116, -13016.578811811476, -36444.91973287064],
+      "geometry": {"rings": [{"role": "outer", "coordinates": [[-13036.672706605126, -36445.6636191944], [-13029.492788836444, -36444.91973287064], [-13021.672987311764, -36446.12935986692], [-13019.403334654966, -36447.89666290808], [-13016.773130460591, -36450.72953789781], [-13016.578811811476, -36472.59652468509], [-13018.059078327029, -36481.96897180404], [-13029.451937289641, -36509.73220941641], [-13031.559840098203, -36508.775018824475], [-13034.293086456833, -36514.473441372116], [-13078.235004123457, -36489.53570721731], [-13072.671159665304, -36479.68112694535], [-13055.346453042239, -36481.25976259232], [-13042.90001547179, -36451.16831605398], [-13036.672706605126, -36445.6636191944]]}]}
+    },
+    {
+      "featureId": "way/1225642369",
+      "osmType": "way",
+      "osmId": 1225642369,
+      "categories": ["cemetery"],
+      "name": null,
+      "latitude": 35.658551374200016,
+      "longitude": 139.68551137556992,
+      "sourceUrl": "https://www.openstreetmap.org/way/1225642369",
+      "tags": {"cemetery": "grave", "landuse": "cemetery", "source": "survey", "survey:date": "2023-11-14"},
+      "crs": "EPSG:6677",
+      "geometryType": "Polygon",
+      "bbox": [-13391.023312432164, -37880.72311764138, -13377.088415263108, -37863.00821598125],
+      "geometry": {"rings": [{"role": "outer", "coordinates": [[-13388.620366553538, -37868.10610004591], [-13385.000074424486, -37863.00821598125], [-13377.088415263108, -37870.16477474669], [-13380.906813440259, -37874.54124135992], [-13379.304459649004, -37880.72311764138], [-13385.316440842187, -37880.71407675606], [-13391.023312432164, -37870.48773655772], [-13388.620366553538, -37868.10610004591]]}]}
+    }
+  ]
+}
