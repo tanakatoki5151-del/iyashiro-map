@@ -315,24 +315,56 @@ async def capture_rumsey_and_gsi() -> dict[str, Any]:
                 try: api_payloads.append({"url":response.url,"payload":await response.json()})
                 except Exception: pass
         page.on("response", lambda r: asyncio.create_task(on_gsi(r)))
-        await page.goto(GSI_PAGE,wait_until="domcontentloaded",timeout=120_000); await page.wait_for_timeout(12_000)
+        # Keep a public-page capture for provenance, but do not depend on the
+        # current UI's year selector (the historical 1935 option can disappear).
+        await page.goto(GSI_PAGE,wait_until="domcontentloaded",timeout=120_000); await page.wait_for_timeout(8_000)
         agree=page.locator("#terms_dialog #agree_btn:visible")
         if await agree.count(): await agree.first.click(timeout=10_000); await page.wait_for_timeout(2_000)
-        await page.locator('#photo select[aria-label="yearfrom"]').select_option("1935")
-        await page.locator('#photo select[aria-label="yearto"]').select_option("1950")
-        await page.locator("#plannerSelector").select_option(value="")
-        await page.locator("#aerial_maplink").click(timeout=20_000); await page.wait_for_timeout(20_000)
-        await page.screenshot(path=str(folder/"search-results.png"),full_page=True)
-        rows=await page.locator("#search_result_pane .ag-center-cols-container .ag-row").evaluate_all("els=>els.map(e=>({rowId:e.getAttribute('row-id'),className:e.className,text:(e.innerText||'').trim()}))")
+        await page.screenshot(path=str(folder/"search-page.png"),full_page=True)
+
+        # Query the ordinary public photo API directly with an explicit date and
+        # spatial window, then validate every returned footprint below.
+        pad=0.04
+        offset=0
+        rows=[]
         ids=[]
-        for row in rows:
-            rid=row.get("rowId") or ""
-            if rid.isdigit(): ids.append(int(rid))
-            else:
-                m=re.search(r"specid-(\d+)",row.get("className") or "")
-                if m: ids.append(int(m.group(1)))
-        for item in api_payloads:
-            ids.extend(int(x) for x in re.findall(r'"(?:specification_id|id)"\s*:\s*(\d+)',json.dumps(item["payload"],ensure_ascii=False)))
+        while True:
+            params={
+                "limit":200,
+                "offset":offset,
+                "rnem":0,
+                "cnem":0,
+                "search_date_from":1935,
+                "search_date_to":1950,
+                "color_type_ids":[1,2],
+                "scale_from":0,
+                "scale_to":99999999,
+                "lon_min":TARGET["lng"]-pad,
+                "lon_max":TARGET["lng"]+pad,
+                "lat_min":TARGET["lat"]-pad,
+                "lat_max":TARGET["lat"]+pad,
+            }
+            direct_url=f"{GSI_API}?{urllib.parse.urlencode(params,doseq=True)}"
+            response=await context.request.get(
+                direct_url,
+                headers={"Referer":GSI_PAGE,"Accept":"application/json"},
+                timeout=120_000,
+                fail_on_status_code=False,
+            )
+            if response.status!=200:
+                api_payloads.append({"url":direct_url,"status":response.status,"payload":None})
+                break
+            payload=await response.json()
+            api_payloads.append({"url":direct_url,"status":response.status,"payload":payload})
+            results=payload.get("results") or []
+            rows.extend(results)
+            ids.extend(int(x["specification_id"]) for x in results if x.get("specification_id") not in (None,""))
+            resultset=payload.get("resultset") or {}
+            count=int(resultset.get("count") or len(results))
+            total=int(resultset.get("total_count") or len(results))
+            offset += count
+            if count==0 or offset>=total:
+                break
         ids=sorted(set(ids)); metadata=[]
         def point_in_poly(lon,lat,corners):
             inside=False; pts=corners+[corners[0]]
@@ -371,7 +403,7 @@ async def capture_rumsey_and_gsi() -> dict[str, Any]:
             downloads.append(row)
         (folder/"photo-metadata.json").write_text(json.dumps(metadata,ensure_ascii=False,indent=2),encoding="utf-8")
         (folder/"downloads.json").write_text(json.dumps(downloads,ensure_ascii=False,indent=2),encoding="utf-8")
-        report["gsi"]={"resultRowCount":len(rows),"metadataCount":len(metadata),"coveringPhotoCount":sum(1 for r in metadata if r.get("containsProxyPoint")),"selectedPhotoIds":[r.get("apiPhotoId") for r in selected],"downloadedCount":sum(1 for d in downloads if d.get("savedAs"))}
+        report["gsi"]={"searchMethod":"public_photo_api_bbox_1935_1950","resultRowCount":len(rows),"metadataCount":len(metadata),"coveringPhotoCount":sum(1 for r in metadata if r.get("containsProxyPoint")),"selectedPhotoIds":[r.get("apiPhotoId") for r in selected],"downloadedCount":sum(1 for d in downloads if d.get("savedAs"))}
         await context.close(); await browser.close()
     return report
 

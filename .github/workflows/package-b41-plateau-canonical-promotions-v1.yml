@@ -1,0 +1,48 @@
+name: V10 B41 PLATEAU canonical formal promotions v1
+
+on:
+  pull_request:
+    paths:
+      - research/package_b41_plateau_canonical_promotions_v1.py
+      - .github/workflows/package-b41-plateau-canonical-promotions-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check requests lxml pyproj shapely
+      - name: Re-run PLATEAU canonical promotion gate
+        run: python research/audit_b41_plateau_canonical_promotion_gate_v1.py
+      - name: Package verified PLATEAU geometries
+        run: python research/package_b41_plateau_canonical_promotions_v1.py
+      - name: Verify package
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          g=json.loads(Path('out-b41-plateau-canonical-promotions-v1/verified-building-polygons-plateau-additions-v1.geojson').read_text(encoding='utf-8'))
+          p=json.loads(Path('out-b41-plateau-canonical-promotions-v1/PROVENANCE.json').read_text(encoding='utf-8'))
+          assert len(g['features'])==2,g
+          assert p['formalPromotions']==2,p
+          assert {f['properties']['propertyId'] for f in g['features']}=={'BLDG-6583382c8322','BLDG-c404c81c08a5'},g
+          assert all(f['properties']['canonicalGeometrySource']=='MLIT PLATEAU 2025 CityGML' for f in g['features']),g
+          assert all(f['properties']['geometryRole']=='building_footprint_not_parcel' for f in g['features']),g
+          assert p['policy']['scoreChange'] is False and p['policy']['rankChange'] is False and p['policy']['automaticExclusionChange'] is False,p
+          print(json.dumps({'formalPromotions':2,'ids':[f['properties']['propertyId'] for f in g['features']]},ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v10-b41-plateau-canonical-promotions-v1
+          path: out-b41-plateau-canonical-promotions-v1
+          if-no-files-found: error
+          retention-days: 14

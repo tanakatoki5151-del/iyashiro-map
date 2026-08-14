@@ -1,0 +1,54 @@
+name: V10 property footprint candidates
+
+on:
+  pull_request:
+    paths:
+      - research/acquire_property_footprints_v1.py
+      - .github/workflows/acquire-property-footprints-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependency
+        run: python -m pip install --disable-pip-version-check requests
+
+      - name: Acquire fail-closed candidates
+        run: python research/acquire_property_footprints_v1.py
+
+      - name: Verify fail-closed contract
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          summary = json.loads(Path("out-property-footprints/summary.json").read_text(encoding="utf-8"))
+          assert summary["counts"]["targets"] == 17, summary
+          assert summary["counts"]["verifiedBuildingPolygonsPromoted"] == 0, summary
+          assert summary["counts"]["parcelPolygonsPromoted"] == 0, summary
+          assert summary["policy"]["scoringEffect"] == "none", summary
+          assert summary["policy"]["rankingEffect"] == "none", summary
+          assert summary["policy"]["automaticExclusionEffect"] == "none", summary
+          print(json.dumps(summary, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload candidate evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: v10-tier1-property-footprint-candidates
+          path: out-property-footprints
+          if-no-files-found: error
+          retention-days: 14

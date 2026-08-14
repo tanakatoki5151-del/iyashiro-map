@@ -1,0 +1,98 @@
+{
+  "schemaVersion": "v10-b46-a2-park-mansion-sensitive-subset-v1",
+  "sourceFullGeometry": {
+    "driveId": "1u1mQFHPMiPm25LnFlNoqSUYwdqFnsfrN",
+    "filename": "osm-sensitive-features-geometry.jsonl.gz",
+    "sha256": "8108dad15b108ec1a1654368e7c7dbb4535963f270ec4cf838cb749c3b2bddef",
+    "featureCount": 31918,
+    "note": "Nearest feature per category was selected by a full local scan of the exact frozen baseline; source baseline unchanged."
+  },
+  "selection": {
+    "method": "global nearest per category across PLATEAU 13110-bldg-50079 and current GSI sturdy building near exact address",
+    "categories": ["temple", "shrine", "cemetery"],
+    "selectedFeatureIds": {
+      "temple": "node/10129994430",
+      "shrine": "node/5921740312",
+      "cemetery": "way/880838154"
+    }
+  },
+  "features": [
+    {
+      "featureId": "node/10129994430",
+      "osmType": "node",
+      "osmId": 10129994430,
+      "categories": ["temple"],
+      "name": "宗圓寺",
+      "latitude": 35.6347849,
+      "longitude": 139.66430640000002,
+      "sourceUrl": "https://www.openstreetmap.org/node/10129994430",
+      "tags": {
+        "amenity": "place_of_worship",
+        "name": "宗圓寺",
+        "religion": "buddhist",
+        "wikidata": "Q97172090",
+        "wikipedia": "ja:宗円寺 (世田谷区)"
+      },
+      "crs": "EPSG:6677",
+      "geometryType": "Point",
+      "bbox": [-15308.5259033482, -40505.45984540005, -15308.5259033482, -40505.45984540005],
+      "geometry": {"coordinates": [-15308.5259033482, -40505.45984540005]}
+    },
+    {
+      "featureId": "node/5921740312",
+      "osmType": "node",
+      "osmId": 5921740312,
+      "categories": ["shrine"],
+      "name": "野沢稲荷神社",
+      "latitude": 35.632606200000005,
+      "longitude": 139.67033320000002,
+      "sourceUrl": "https://www.openstreetmap.org/node/5921740312",
+      "tags": {
+        "amenity": "place_of_worship",
+        "name": "野沢稲荷神社",
+        "religion": "shinto",
+        "source": "survey",
+        "wikidata": "Q106852465",
+        "wikimedia_commons": "Category:Nozawa Inari shrine",
+        "wikipedia": "ja:野沢稲荷神社"
+      },
+      "crs": "EPSG:6677",
+      "geometryType": "Point",
+      "bbox": [-14763.087437768412, -40748.089046806475, -14763.087437768412, -40748.089046806475],
+      "geometry": {"coordinates": [-14763.087437768412, -40748.089046806475]}
+    },
+    {
+      "featureId": "way/880838154",
+      "osmType": "way",
+      "osmId": 880838154,
+      "categories": ["cemetery"],
+      "name": null,
+      "latitude": 35.63445276321675,
+      "longitude": 139.66375604797912,
+      "sourceUrl": "https://www.openstreetmap.org/way/880838154",
+      "tags": {"landuse": "cemetery"},
+      "crs": "EPSG:6677",
+      "geometryType": "Polygon",
+      "bbox": [-15376.027797940651, -40564.28451835518, -15340.840359839884, -40520.15892653664],
+      "geometry": {
+        "rings": [
+          {
+            "role": "outer",
+            "coordinates": [
+              [-15360.474411821682, -40520.15892653664],
+              [-15376.027797940651, -40532.202539567654],
+              [-15372.841897919898, -40549.18210863849],
+              [-15368.856532456633, -40549.000385573956],
+              [-15364.526511790733, -40564.28451835518],
+              [-15346.331108712222, -40559.03506579724],
+              [-15350.345868002607, -40544.738865734435],
+              [-15340.840359839884, -40541.959513779555],
+              [-15342.475507853153, -40523.77336387926],
+              [-15360.474411821682, -40520.15892653664]
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

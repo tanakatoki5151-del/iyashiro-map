@@ -3,12 +3,17 @@ name: Acquire NDL Tokyo 1:5000 Asakusa map
 on:
   workflow_dispatch:
   push:
-    branches: [research/mlit-l03b-acquisition-20260811]
+    branches:
+      - research/mlit-l03b-acquisition-20260811
+      - agent/research-ci-hardening-20260814
+      - agent/research-acquisition-recovery-20260814
     paths:
       - '.github/workflows/acquire-ndl-tokyo-5000-asakusa.yml'
       - 'research/acquire_ndl_tokyo_5000_asakusa.py'
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - research/mlit-l03b-acquisition-20260811
     paths:
       - '.github/workflows/acquire-ndl-tokyo-5000-asakusa.yml'
       - 'research/acquire_ndl_tokyo_5000_asakusa.py'
@@ -30,22 +35,32 @@ jobs:
           python -m pip install --disable-pip-version-check playwright
           python -m playwright install --with-deps chromium
       - name: Acquire NDL public map resources
-        continue-on-error: true
+        id: acquire
         run: python research/acquire_ndl_tokyo_5000_asakusa.py
       - name: Publish summary
         if: always()
         shell: bash
         run: |
           echo '## NDL Tokyo 1:5,000 map acquisition' >> "$GITHUB_STEP_SUMMARY"
+          echo "- acquisition outcome: ${{ steps.acquire.outcome }}" >> "$GITHUB_STEP_SUMMARY"
           if [ -f out-ndl-tokyo-5000-asakusa/SUMMARY.json ]; then
             cat out-ndl-tokyo-5000-asakusa/SUMMARY.json >> "$GITHUB_STEP_SUMMARY"
           else
-            echo 'SUMMARY.json not produced' >> "$GITHUB_STEP_SUMMARY"
+            echo '- SUMMARY.json not produced' >> "$GITHUB_STEP_SUMMARY"
           fi
-      - uses: actions/upload-artifact@v4
+      - name: Preserve complete or partial evidence
+        id: upload
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: ndl-tokyo-5000-asakusa
           path: out-ndl-tokyo-5000-asakusa
           if-no-files-found: warn
           retention-days: 14
+      - name: Fail closed on acquisition or contract failure
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ steps.acquire.outcome }}" = 'success'
+          test -s out-ndl-tokyo-5000-asakusa/SUMMARY.json

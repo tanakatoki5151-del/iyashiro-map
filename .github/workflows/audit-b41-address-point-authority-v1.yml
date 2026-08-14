@@ -1,0 +1,44 @@
+name: V10 B41 address point authority v1
+
+on:
+  pull_request:
+    paths:
+      - research/audit_b41_address_point_authority_v1.py
+      - .github/workflows/audit-b41-address-point-authority-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check requests pyproj
+      - name: Cross-check GSI and PLATEAU administration
+        run: python research/audit_b41_address_point_authority_v1.py
+      - name: Verify fail-closed contract
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s=json.loads(Path('out-b41-address-point-authority-v1/SUMMARY.json').read_text(encoding='utf-8'))
+          assert len(s['items']) == 4, s
+          assert s['policy']['formalPointReplacement'] == 0, s
+          assert s['policy']['formalGeometryPromotion'] == 0, s
+          assert s['policy']['scoringEffect'] == 'none', s
+          assert all(x['gsiResults'] for x in s['items']), s
+          print(json.dumps({x['propertyId']:{'decision':x['decision'],'gsiDeltaM':x['gsiResults'][0]['distanceFromFrozenM'],'frozenCities':x['frozenPlateauCities']} for x in s['items']},ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v10-b41-address-point-authority-v1
+          path: out-b41-address-point-authority-v1
+          if-no-files-found: error
+          retention-days: 14

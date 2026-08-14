@@ -27,6 +27,13 @@ TARGET_TEXTS = [
     "東京北東部淺草及下谷",
     "第1號",
 ]
+BIB_ID = "R100000002-I000009816796"
+DIGITAL_ITEM_ID = "R100000039-I13712189"
+PID = "13712189"
+CHILD_URL = f"https://ndlsearch.ndl.go.jp/books/{BIB_ID}"
+DIGITAL_URL = f"https://dl.ndl.go.jp/pid/{PID}"
+THUMB_URL = f"https://dl.ndl.go.jp/titleThumb/info:ndljp/pid/{PID}"
+ACCESS_STATUS = "ndl_on_site_only_not_public_fulltext"
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -102,49 +109,24 @@ async def main() -> None:
         await page.screenshot(path=str(OUT / "01_ndl_search.png"), full_page=True)
         (OUT / "01_ndl_search.html").write_text(await page.content(), encoding="utf-8")
 
-        # Prefer a link whose text contains the exact sheet title.
-        target = None
-        for text in TARGET_TEXTS[:2]:
-            loc = page.get_by_text(text, exact=False)
-            if await loc.count():
-                target = loc.first
-                break
-        if target is None:
-            # Fallback: inspect all links and choose a likely child item.
-            links = await page.locator("a").evaluate_all(
-                "els => els.map(a => ({text:(a.innerText||'').trim(), href:a.href}))"
-            )
-            (OUT / "search-links.json").write_text(json.dumps(links, ensure_ascii=False, indent=2), encoding="utf-8")
-            href = next((x["href"] for x in links if "浅草" in x["text"] and "下谷" in x["text"]), None)
-            if href:
-                await page.goto(href, wait_until="domcontentloaded", timeout=120_000)
-        else:
-            await target.click(timeout=20_000)
-            await page.wait_for_timeout(8_000)
+        # NDL Search exposes the official stable child ID in its public JSON.
+        # Use that canonical URL directly: the visual search-card title may live
+        # inside a hidden span, so clicking it is neither necessary nor reliable.
+        await page.goto(CHILD_URL, wait_until="domcontentloaded", timeout=120_000)
+        await page.wait_for_timeout(8_000)
+        child_url = page.url
 
         await page.screenshot(path=str(OUT / "02_child_item.png"), full_page=True)
         (OUT / "02_child_item.html").write_text(await page.content(), encoding="utf-8")
         child_url = page.url
 
-        # Follow the public digital-collection link.
-        digital_link = None
-        for pattern in ["収録元データベースで確認する", "インターネットで資料を読む", "国立国会図書館デジタルコレクション"]:
-            loc = page.get_by_text(pattern, exact=False)
-            if await loc.count():
-                digital_link = loc.first
-                break
-        if digital_link:
-            try:
-                async with page.expect_popup(timeout=10_000) as popup_info:
-                    await digital_link.click(timeout=15_000)
-                digital_page = await popup_info.value
-                await digital_page.wait_for_load_state("domcontentloaded", timeout=120_000)
-                page = digital_page
-            except Exception:
-                await digital_link.click(timeout=15_000)
-                await page.wait_for_timeout(10_000)
-
+        # The public catalog identifies PID 13712189, but its access policy is
+        # NDL-on-site-only and outside library/personal transmission. Visit the
+        # ordinary public PID page and thumbnail endpoint only; never attempt to
+        # derive or bypass restricted image-viewer resources.
+        await page.goto(DIGITAL_URL, wait_until="domcontentloaded", timeout=120_000)
         await page.wait_for_timeout(12_000)
+
         await page.screenshot(path=str(OUT / "03_digital_collection.png"), full_page=True)
         (OUT / "03_digital_collection.html").write_text(await page.content(), encoding="utf-8")
         digital_url = page.url
@@ -212,10 +194,19 @@ async def main() -> None:
             "childItemUrl": child_url,
             "digitalCollectionUrl": digital_url,
             "networkResponseCount": len(network),
+            "searchResultNavigation": "canonical_stable_child_and_pid_urls",
+            "bibId": BIB_ID,
+            "digitalItemId": DIGITAL_ITEM_ID,
+            "pid": PID,
+            "publicThumbnailUrl": THUMB_URL,
+            "accessStatus": ACCESS_STATUS,
+            "researchOutcome": "official_access_gate_closed",
+            "publicFullImageAcquired": False,
+            "scoringEffect": "none",
             "savedNetworkPayloadCount": sum(1 for r in network if r.get("savedAs")),
             "candidateResourceCount": len(candidates),
             "acquiredResourceCount": sum(1 for r in acquired if r.get("savedAs")),
-            "qualityRule": "Only public resources reached through ordinary pages are retained. Restricted pages are not bypassed. A map image must be independently georeferenced and reviewed before any historical boundary is promoted.",
+            "qualityRule": "The official stable PID and access gate are the completed research outcome. Only ordinary public pages and thumbnails are retained; restricted full images are not bypassed. Any later acquired map image must be independently georeferenced and reviewed before historical-boundary promotion.",
         }
         (OUT / "SUMMARY.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps(summary, ensure_ascii=False, indent=2))

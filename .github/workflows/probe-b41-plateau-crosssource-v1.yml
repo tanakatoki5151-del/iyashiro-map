@@ -1,0 +1,45 @@
+name: V10 B41 PLATEAU cross-source v1
+
+on:
+  pull_request:
+    paths:
+      - research/probe_b41_plateau_crosssource_v1.py
+      - .github/workflows/probe-b41-plateau-crosssource-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check requests lxml pyproj shapely
+      - name: Probe official PLATEAU CityGML
+        run: python research/probe_b41_plateau_crosssource_v1.py
+      - name: Verify fail-closed contract
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s=json.loads(Path('out-b41-plateau-crosssource-v1/SUMMARY.json').read_text(encoding='utf-8'))
+          assert s['targets']==4, s
+          assert s['formalBuildingPolygonsPromoted']==0, s
+          assert s['verifiedGeometryAdded']==0, s
+          assert s['policy']['scoringEffect']=='none', s
+          assert all(x['sourceFiles'] for x in s['items']), s
+          assert all(x['candidateCountWithin90m']>0 for x in s['items']), s
+          print(json.dumps({x['propertyId']:x['candidateCountWithin90m'] for x in s['items']},ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v10-b41-plateau-crosssource-v1
+          path: out-b41-plateau-crosssource-v1
+          if-no-files-found: error
+          retention-days: 14

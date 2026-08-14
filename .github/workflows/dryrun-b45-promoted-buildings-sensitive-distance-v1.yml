@@ -1,0 +1,47 @@
+name: V10 B45 promoted buildings sensitive distance v1
+
+on:
+  pull_request:
+    paths:
+      - research/dryrun_b45_promoted_buildings_sensitive_distance_v1.py
+      - research/fixtures/b41_sensitive_subset_top2_v1.json
+      - .github/workflows/dryrun-b45-promoted-buildings-sensitive-distance-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dryrun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check requests pyproj shapely lxml
+      - name: Run verified-only sensitive-distance dry-run
+        run: PYTHONPATH=. python research/dryrun_b45_promoted_buildings_sensitive_distance_v1.py
+      - name: Verify no class/ranking drift
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s=json.loads(Path('out-b45-promoted-buildings-sensitive-distance-v1/SUMMARY.json').read_text(encoding='utf-8'))
+          assert s['summary']['formalBuildingsDryRun']==2,s
+          assert s['summary']['comparisons']==6,s
+          assert s['summary']['classChanges']==0,s
+          assert s['summary']['scoreChanges']==0,s
+          assert s['summary']['rankChanges']==0,s
+          assert s['summary']['automaticExclusionChanges']==0,s
+          assert s['policy']['decision']=='pass_class_unchanged',s
+          print(json.dumps(s['summary'],ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v10-b45-promoted-buildings-sensitive-distance-v1
+          path: out-b45-promoted-buildings-sensitive-distance-v1
+          if-no-files-found: error
+          retention-days: 14

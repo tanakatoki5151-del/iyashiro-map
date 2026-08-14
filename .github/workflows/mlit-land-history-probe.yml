@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - research/mlit-l03b-acquisition-20260811
+      - agent/research-ci-hardening-20260814
     paths:
       - '.github/workflows/mlit-land-history-probe.yml'
       - 'research/mlit_land_history_probe.py'
@@ -12,6 +13,7 @@ on:
   pull_request:
     branches:
       - main
+      - research/mlit-l03b-acquisition-20260811
     paths:
       - '.github/workflows/mlit-land-history-probe.yml'
       - 'research/mlit_land_history_probe.py'
@@ -31,29 +33,51 @@ jobs:
           python-version: '3.12'
       - name: Install probe dependencies
         run: python -m pip install --disable-pip-version-check requests beautifulsoup4
-      - name: Probe split GIS downloads
+      - name: Probe optional split GIS downloads
+        id: split
         continue-on-error: true
         run: python research/mlit_land_history_probe.py
-      - name: Download exact nine combined GIS archives
+      - name: Download required nine combined GIS archives
+        id: combined
         run: python research/mlit_combined9_probe.py
-      - name: Publish summary
+      - name: Publish explicit required and optional outcomes
         if: always()
         shell: bash
         run: |
           echo '## MLIT Land History Survey GIS probe' >> "$GITHUB_STEP_SUMMARY"
+          echo "- required combined-nine outcome: ${{ steps.combined.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- optional split-download outcome: ${{ steps.split.outcome }}" >> "$GITHUB_STEP_SUMMARY"
           if [ -f out-land-history/STATUS.txt ]; then
             cat out-land-history/STATUS.txt | sed 's/^/- /' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '- optional split STATUS.txt was not produced' >> "$GITHUB_STEP_SUMMARY"
           fi
-          echo '### Combined nine sheets' >> "$GITHUB_STEP_SUMMARY"
+          echo '### Required combined nine sheets' >> "$GITHUB_STEP_SUMMARY"
           if [ -f out-land-history/combined9/SHA256SUMS.txt ]; then
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            echo '~~~' >> "$GITHUB_STEP_SUMMARY"
             cat out-land-history/combined9/SHA256SUMS.txt >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            echo '~~~' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '- combined9 SHA256SUMS.txt was not produced' >> "$GITHUB_STEP_SUMMARY"
           fi
-      - uses: actions/upload-artifact@v4
+      - name: Preserve complete and partial evidence
+        id: upload
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: mlit-land-history-gis-probe
           path: out-land-history
           if-no-files-found: warn
           retention-days: 14
+      - name: Gate required combined-nine contract
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ steps.combined.outcome }}" = 'success'
+          test -s out-land-history/combined9/SHA256SUMS.txt
+          count="$(grep -cve '^[[:space:]]*$' out-land-history/combined9/SHA256SUMS.txt)"
+          test "$count" -eq 9
+          if [ "${{ steps.split.outcome }}" != 'success' ]; then
+            echo 'Optional split probe is incomplete; combined nine remain the required release contract.' >&2
+          fi
