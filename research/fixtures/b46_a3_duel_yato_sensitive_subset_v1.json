@@ -1,0 +1,86 @@
+{
+  "schemaVersion": "v10-b46-a3-duel-yato-sensitive-subset-v1",
+  "sourceFullGeometry": {
+    "driveId": "1u1mQFHPMiPm25LnFlNoqSUYwdqFnsfrN",
+    "filename": "osm-sensitive-features-geometry.jsonl.gz",
+    "sha256": "8108dad15b108ec1a1654368e7c7dbb4535963f270ec4cf838cb749c3b2bddef",
+    "featureCount": 31918,
+    "note": "Nearest feature per category was selected by a full local scan of the exact frozen baseline; source baseline unchanged."
+  },
+  "selection": {
+    "method": "global nearest per category across PLATEAU 13110-bldg-50606, legacy OSM way/688689754, and best-overlap current GSI building fragment",
+    "categories": ["temple", "shrine", "cemetery"],
+    "selectedFeatureIds": {
+      "temple": "node/5964037556",
+      "shrine": "node/5921740312",
+      "cemetery": "way/1107058867"
+    }
+  },
+  "features": [
+    {
+      "featureId": "node/5964037556",
+      "osmType": "node",
+      "osmId": 5964037556,
+      "categories": ["temple"],
+      "name": "龍雲禅寺",
+      "latitude": 35.63280820000001,
+      "longitude": 139.67222610000002,
+      "sourceUrl": "https://www.openstreetmap.org/node/5964037556",
+      "tags": {"amenity": "place_of_worship", "name": "龍雲禅寺", "religion": "buddhist"},
+      "crs": "EPSG:6677",
+      "geometryType": "Point",
+      "bbox": [-14591.608705912256, -40725.96141098668, -14591.608705912256, -40725.96141098668],
+      "geometry": {"coordinates": [-14591.608705912256, -40725.96141098668]}
+    },
+    {
+      "featureId": "node/5921740312",
+      "osmType": "node",
+      "osmId": 5921740312,
+      "categories": ["shrine"],
+      "name": "野沢稲荷神社",
+      "latitude": 35.632606200000005,
+      "longitude": 139.67033320000002,
+      "sourceUrl": "https://www.openstreetmap.org/node/5921740312",
+      "tags": {
+        "amenity": "place_of_worship",
+        "name": "野沢稲荷神社",
+        "religion": "shinto",
+        "source": "survey",
+        "wikidata": "Q106852465",
+        "wikimedia_commons": "Category:Nozawa Inari shrine",
+        "wikipedia": "ja:野沢稲荷神社"
+      },
+      "crs": "EPSG:6677",
+      "geometryType": "Point",
+      "bbox": [-14763.087437768412, -40748.089046806475, -14763.087437768412, -40748.089046806475],
+      "geometry": {"coordinates": [-14763.087437768412, -40748.089046806475]}
+    },
+    {
+      "featureId": "way/1107058867",
+      "osmType": "way",
+      "osmId": 1107058867,
+      "categories": ["cemetery"],
+      "name": null,
+      "latitude": 35.63315896323148,
+      "longitude": 139.67128644822725,
+      "sourceUrl": "https://www.openstreetmap.org/way/1107058867",
+      "tags": {"amenity": "grave_yard"},
+      "crs": "EPSG:6677",
+      "geometryType": "Polygon",
+      "bbox": [-14682.356329195229, -40695.68056187666, -14670.942988999, -40678.13438609238],
+      "geometry": {
+        "rings": [
+          {
+            "role": "outer",
+            "coordinates": [
+              [-14682.356329195229, -40695.68056187666],
+              [-14679.456317870816, -40678.13438609238],
+              [-14670.942988999, -40689.32022796757],
+              [-14682.356329195229, -40695.68056187666]
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
