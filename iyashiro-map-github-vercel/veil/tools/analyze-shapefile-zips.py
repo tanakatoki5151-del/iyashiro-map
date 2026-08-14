@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import csv
+import io
 import json
-import math
 import struct
 import sys
 import zipfile
@@ -68,8 +68,9 @@ def read_dbf_header(data: bytes):
 def semantic_class(name: str, fields):
     text = (name + " " + " ".join(f.get("name", "") for f in fields)).lower()
     rules = [
-        ("archaeology", ["maizou", "archae", "遺跡", "埋蔵"]),
+        ("archaeology", ["maizou", "archae", "遺跡", "埋蔵", "包蔵地"]),
         ("cemetery_or_memorial", ["墓", "cemet", "memorial", "記念", "碑"]),
+        ("shrine_temple_context", ["寺社", "神社", "寺院"]),
         ("hydrography", ["河川", "水路", "water", "river", "hydro", "海岸", "池", "湖"]),
         ("building", ["建物", "building", "bldg", "家屋"]),
         ("road", ["道路", "road", "street", "中心線"]),
@@ -87,6 +88,8 @@ def infer_crs(prj_text: str):
     for key in ["JGD2011", "JGD_2011", "JGD2000", "JGD_2000", "TOKYO", "WGS_1984", "WGS 84"]:
         if key in t:
             hints.append(key)
+    if "JAPAN_ZONE_9" in t or "JAPAN ZONE 9" in t:
+        hints.append("JAPAN_ZONE_9")
     if "TRANSVERSE_MERCATOR" in t or "TRANSVERSE MERCATOR" in t:
         hints.append("TRANSVERSE_MERCATOR")
     if "GEOGCS" in t or "GEOGCRS" in t:
@@ -96,71 +99,133 @@ def infer_crs(prj_text: str):
     return sorted(set(hints))
 
 
+def inspect_zip(zf, archive_path="", depth=0, max_depth=3):
+    layers = []
+    nested = []
+    ancillary = []
+    errors = []
+    names = zf.namelist()
+    lower_map = {n.lower(): n for n in names}
+
+    shp_names = [n for n in names if n.lower().endswith(".shp") and not n.endswith("/")]
+    for shp_name in sorted(shp_names):
+        base = shp_name[:-4]
+        dbf_name = lower_map.get((base + ".dbf").lower())
+        prj_name = lower_map.get((base + ".prj").lower())
+        cpg_name = lower_map.get((base + ".cpg").lower())
+        try:
+            shp_header = read_shp_header(zf.read(shp_name)[:100])
+        except Exception as exc:
+            shp_header = {"valid": False, "error": repr(exc)}
+        dbf = {"valid": False, "reason": "dbf_missing", "fields": []}
+        if dbf_name:
+            try:
+                dbf = read_dbf_header(zf.read(dbf_name)[:65536])
+            except Exception as exc:
+                dbf = {"valid": False, "error": repr(exc), "fields": []}
+        prj = ""
+        if prj_name:
+            try:
+                prj = zf.read(prj_name).decode("utf-8", errors="replace")
+            except Exception:
+                try:
+                    prj = zf.read(prj_name).decode("cp932", errors="replace")
+                except Exception as exc:
+                    prj = f"READ_ERROR:{exc!r}"
+        cpg = None
+        if cpg_name:
+            try:
+                cpg = zf.read(cpg_name).decode("ascii", errors="replace").strip()
+            except Exception:
+                cpg = None
+        semantic_name = f"{archive_path} {shp_name}"
+        layers.append({
+            "containerZipPath": archive_path or None,
+            "nestingDepth": depth,
+            "shpPath": shp_name,
+            "baseName": Path(base).name,
+            "shpHeader": shp_header,
+            "dbf": dbf,
+            "prjPath": prj_name,
+            "prjWkt": prj,
+            "crsHints": infer_crs(prj),
+            "crsStatus": "DECLARED_PRJ" if prj_name else "PRJ_MISSING",
+            "cpg": cpg,
+            "semanticClasses": semantic_class(semantic_name, dbf.get("fields", [])),
+        })
+
+    nested_names = [n for n in names if n.lower().endswith(".zip") and not n.endswith("/")]
+    for nested_name in sorted(nested_names):
+        nested_path = f"{archive_path}!/{nested_name}" if archive_path else nested_name
+        if depth >= max_depth:
+            nested.append({"zipPath": nested_path, "status": "MAX_DEPTH_REACHED"})
+            continue
+        try:
+            payload = zf.read(nested_name)
+            with zipfile.ZipFile(io.BytesIO(payload)) as inner:
+                child = inspect_zip(inner, nested_path, depth + 1, max_depth)
+            layers.extend(child["layers"])
+            nested.append({
+                "zipPath": nested_path,
+                "status": "INSPECTED",
+                "layerCount": len(child["layers"]),
+                "nestedZipCount": len(child["nestedZips"]),
+            })
+            nested.extend(child["nestedZips"])
+            ancillary.extend(child["ancillaryFiles"])
+            errors.extend(child["errors"])
+        except Exception as exc:
+            nested.append({"zipPath": nested_path, "status": "ERROR", "error": repr(exc)})
+            errors.append(f"nested {nested_path}: {exc!r}")
+
+    recognized = {".shp", ".shx", ".dbf", ".prj", ".cpg", ".sbn", ".sbx", ".zip"}
+    ancillary.extend([
+        f"{archive_path}!/{n}" if archive_path else n
+        for n in names
+        if not n.endswith("/") and Path(n).suffix.lower() not in recognized
+    ])
+    return {"layers": layers, "nestedZips": nested, "ancillaryFiles": ancillary[:1000], "errors": errors}
+
+
 def analyze_zip(zip_path: Path):
     report = {
         "zipName": zip_path.name,
         "zipBytes": zip_path.stat().st_size,
         "layers": [],
+        "nestedZips": [],
         "ancillaryFiles": [],
         "errors": [],
     }
     try:
         with zipfile.ZipFile(zip_path) as zf:
-            names = zf.namelist()
-            lower_map = {n.lower(): n for n in names}
-            shp_names = [n for n in names if n.lower().endswith(".shp") and not n.endswith("/")]
-            for shp_name in sorted(shp_names):
-                base = shp_name[:-4]
-                dbf_name = lower_map.get((base + ".dbf").lower())
-                prj_name = lower_map.get((base + ".prj").lower())
-                cpg_name = lower_map.get((base + ".cpg").lower())
-                try:
-                    shp_header = read_shp_header(zf.read(shp_name)[:100])
-                except Exception as exc:
-                    shp_header = {"valid": False, "error": repr(exc)}
-                dbf = {"valid": False, "reason": "dbf_missing", "fields": []}
-                if dbf_name:
-                    try:
-                        dbf = read_dbf_header(zf.read(dbf_name)[:65536])
-                    except Exception as exc:
-                        dbf = {"valid": False, "error": repr(exc), "fields": []}
-                prj = ""
-                if prj_name:
-                    try:
-                        prj = zf.read(prj_name).decode("utf-8", errors="replace")
-                    except Exception:
-                        try:
-                            prj = zf.read(prj_name).decode("cp932", errors="replace")
-                        except Exception as exc:
-                            prj = f"READ_ERROR:{exc!r}"
-                cpg = None
-                if cpg_name:
-                    try:
-                        cpg = zf.read(cpg_name).decode("ascii", errors="replace").strip()
-                    except Exception:
-                        cpg = None
-                layer = {
-                    "shpPath": shp_name,
-                    "baseName": Path(base).name,
-                    "shpHeader": shp_header,
-                    "dbf": dbf,
-                    "prjPath": prj_name,
-                    "prjWkt": prj,
-                    "crsHints": infer_crs(prj),
-                    "cpg": cpg,
-                    "semanticClasses": semantic_class(Path(base).name, dbf.get("fields", [])),
-                }
-                report["layers"].append(layer)
-            report["ancillaryFiles"] = [
-                n for n in names
-                if not n.endswith("/") and Path(n).suffix.lower() not in {".shp", ".shx", ".dbf", ".prj", ".cpg", ".sbn", ".sbx"}
-            ][:500]
+            found = inspect_zip(zf)
+        report.update(found)
     except Exception as exc:
         report["errors"].append(repr(exc))
+
     report["layerCount"] = len(report["layers"])
-    report["shapeTypes"] = sorted(set(l.get("shpHeader", {}).get("shapeType") for l in report["layers"] if l.get("shpHeader", {}).get("shapeType")))
-    report["crsHintSets"] = sorted({"|".join(l.get("crsHints", [])) for l in report["layers"] if l.get("crsHints")})
+    report["nestedZipCount"] = len(report["nestedZips"])
+    report["shapeTypes"] = sorted(set(
+        l.get("shpHeader", {}).get("shapeType")
+        for l in report["layers"]
+        if l.get("shpHeader", {}).get("shapeType")
+    ))
+    report["crsHintSets"] = sorted({
+        "|".join(l.get("crsHints", []))
+        for l in report["layers"]
+        if l.get("crsHints")
+    })
     report["recordCountTotal"] = sum(int(l.get("dbf", {}).get("recordCount") or 0) for l in report["layers"])
+    report["prjDeclaredLayerCount"] = sum(1 for l in report["layers"] if l.get("prjPath"))
+    report["prjMissingLayerCount"] = report["layerCount"] - report["prjDeclaredLayerCount"]
+    if report["layerCount"] == 0:
+        report["crsStatus"] = "NO_LAYERS_FOUND"
+    elif report["prjDeclaredLayerCount"] == report["layerCount"]:
+        report["crsStatus"] = "ALL_LAYERS_DECLARED_PRJ"
+    elif report["prjDeclaredLayerCount"] == 0:
+        report["crsStatus"] = "ALL_LAYERS_PRJ_MISSING"
+    else:
+        report["crsStatus"] = "MIXED_PRJ_DECLARATION"
     return report
 
 
@@ -176,28 +241,41 @@ summary = {
             "zipName": r["zipName"],
             "zipBytes": r["zipBytes"],
             "layerCount": r["layerCount"],
+            "nestedZipCount": r["nestedZipCount"],
             "recordCountTotal": r["recordCountTotal"],
             "shapeTypes": r["shapeTypes"],
             "crsHintSets": r["crsHintSets"],
+            "crsStatus": r["crsStatus"],
+            "prjDeclaredLayerCount": r["prjDeclaredLayerCount"],
+            "prjMissingLayerCount": r["prjMissingLayerCount"],
             "errors": r["errors"],
         }
         for r in reports
     ],
 }
 
-(REPORTS / "shapefile-inventory.json").write_text(json.dumps({"summary": summary, "archives": reports}, ensure_ascii=False, indent=2), encoding="utf-8")
+(REPORTS / "shapefile-inventory.json").write_text(
+    json.dumps({"summary": summary, "archives": reports}, ensure_ascii=False, indent=2),
+    encoding="utf-8",
+)
 
 with (REPORTS / "shapefile-layers.csv").open("w", encoding="utf-8", newline="") as f:
     w = csv.writer(f)
-    w.writerow(["zipName","shpPath","shapeType","recordCount","bbox","crsHints","semanticClasses","fieldNames","cpg"])
+    w.writerow([
+        "zipName","containerZipPath","nestingDepth","shpPath","shapeType","recordCount","bbox",
+        "crsStatus","crsHints","semanticClasses","fieldNames","cpg",
+    ])
     for archive in reports:
         for layer in archive["layers"]:
             w.writerow([
                 archive["zipName"],
+                layer.get("containerZipPath"),
+                layer.get("nestingDepth"),
                 layer["shpPath"],
                 layer.get("shpHeader", {}).get("shapeType"),
                 layer.get("dbf", {}).get("recordCount"),
                 json.dumps(layer.get("shpHeader", {}).get("bbox"), ensure_ascii=False),
+                layer.get("crsStatus"),
                 "|".join(layer.get("crsHints", [])),
                 "|".join(layer.get("semanticClasses", [])),
                 "|".join(x.get("name", "") for x in layer.get("dbf", {}).get("fields", [])),
