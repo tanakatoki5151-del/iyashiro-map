@@ -39,7 +39,7 @@ jobs:
         if: always()
         run: python veil/tools/analyze-csv-payloads.py veil-network-out
 
-      - name: Inventory shapefile ZIPs without semantic promotion
+      - name: Inventory shapefile ZIPs recursively without semantic promotion
         if: always()
         run: python veil/tools/analyze-shapefile-zips.py veil-network-out
 
@@ -102,8 +102,11 @@ jobs:
           } else {
             const inv = JSON.parse(fs.readFileSync(shpPath, 'utf8'));
             if (inv.summary?.zipCount !== 8) problems.push(`shapefile zipCount=${inv.summary?.zipCount}/8`);
-            const archiveErrors = (inv.summary?.zips || []).filter(z => (z.errors || []).length > 0);
+            const zips = inv.summary?.zips || [];
+            const archiveErrors = zips.filter(z => (z.errors || []).length > 0);
             if (archiveErrors.length) problems.push(`shapefile archive errors=${archiveErrors.length}`);
+            const emptyArchives = zips.filter(z => !Number.isInteger(z.layerCount) || z.layerCount <= 0);
+            if (emptyArchives.length) problems.push(`shapefile empty archives=${emptyArchives.map(z => z.zipName).join('|')}`);
           }
           if (problems.length) {
             console.error('VEIL_FAIL_CLOSED=' + JSON.stringify(problems));
