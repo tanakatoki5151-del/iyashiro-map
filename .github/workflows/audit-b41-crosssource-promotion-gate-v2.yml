@@ -22,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --disable-pip-version-check requests lxml pyproj shapely
       - name: Run corrected cross-source promotion gate
-        run: python research/audit_b41_crosssource_promotion_gate_v2.py
+        run: PYTHONPATH=. python research/audit_b41_crosssource_promotion_gate_v2.py
       - name: Verify contract output
         run: |
           python - <<'PY'
