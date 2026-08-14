@@ -1,0 +1,52 @@
+name: V10 Kakinokizaka greenway proxy v1
+
+on:
+  pull_request:
+    paths:
+      - research/acquire_kakinokizaka_greenway_proxy_v1.py
+      - .github/workflows/acquire-kakinokizaka-greenway-proxy-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check requests shapely pyproj
+
+      - name: Acquire current greenway proxy and intersect target cells
+        run: python research/acquire_kakinokizaka_greenway_proxy_v1.py
+
+      - name: Verify fail-closed contract
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s=json.loads(Path('out-kakinokizaka-greenway-proxy-v1/SUMMARY.json').read_text(encoding='utf-8'))
+          assert s['policy']['historicalCenterlineVerified'] is False, s
+          assert s['policy']['formalHistoricalGeometryPromotion'] is False, s
+          assert s['policy']['scoringEffect'] == 'none', s
+          assert s['policy']['rankingEffect'] == 'none', s
+          assert s['policy']['automaticExclusionEffect'] == 'none', s
+          print(json.dumps(s, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: v10-kakinokizaka-greenway-proxy-v1
+          path: out-kakinokizaka-greenway-proxy-v1
+          if-no-files-found: error
+          retention-days: 14
