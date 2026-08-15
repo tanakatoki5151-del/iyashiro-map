@@ -52,7 +52,7 @@ jobs:
           compression-level: 6
           retention-days: 14
 
-      - name: Fail closed on query errors
+      - name: Fail closed on query or parse errors
         if: always()
         run: |
           node <<'NODE'
@@ -63,8 +63,21 @@ jobs:
             process.exit(1);
           }
           const s = JSON.parse(fs.readFileSync(p, 'utf8'));
-          if (s.results?.queryErrors !== 0 || s.results?.acquired !== 48) {
-            console.error('VEIL_NICHIBUNKEN_FAIL_CLOSED=' + JSON.stringify(s.results));
+          const all = s.results?.allQueries;
+          const simple = s.results?.byQueryType?.F1_SIMPLE_CURRENT_MUNICIPALITY_RECALL_ONLY;
+          const contextual = s.results?.byQueryType?.F1_CONTEXTUAL_CURRENT_MUNICIPALITY_RECALL_ONLY;
+          const problems = [];
+          if (!all || all.queries !== 96 || all.acquired !== 96 || all.queryErrors !== 0) {
+            problems.push(`allQueries=${JSON.stringify(all)}`);
+          }
+          if (!simple || simple.queries !== 48 || simple.acquired !== 48 || simple.queryErrors !== 0) {
+            problems.push(`simple=${JSON.stringify(simple)}`);
+          }
+          if (!contextual || contextual.queries !== 48 || contextual.acquired !== 48 || contextual.queryErrors !== 0) {
+            problems.push(`contextual=${JSON.stringify(contextual)}`);
+          }
+          if (problems.length) {
+            console.error('VEIL_NICHIBUNKEN_FAIL_CLOSED=' + JSON.stringify(problems));
             process.exit(1);
           }
           console.log('VEIL_NICHIBUNKEN_GATE=PASS');
