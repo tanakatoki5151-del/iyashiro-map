@@ -23,14 +23,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p out/14101 out/14106 out/14113 report
-          for code in 14101 14106 14113; do
+          # Only towns independently confirmed as 住居表示実施 are eligible for
+          # this GSI base-number route. Non-jukyo towns must use a land-lot/
+          # cadastral route before any canonical-cell decision.
+          mkdir -p out/14101 out/14113 report
+          for code in 14101 14113; do
             curl --fail --location --retry 3 --retry-delay 2 \
               "https://saigai.gsi.go.jp/jusho/download/data/${code}.zip" \
               -o "out/${code}.zip"
             unzip -q "out/${code}.zip" -d "out/${code}"
           done
-          sha256sum out/14101.zip out/14106.zip out/14113.zip > report/archive-sha256.txt
+          sha256sum out/14101.zip out/14113.zip > report/archive-sha256.txt
           find out -maxdepth 3 -type f -printf '%p\n' | sort > report/archive-files.txt
 
       - name: Extract exact target base-number rows without feature promotion
@@ -39,6 +42,9 @@ jobs:
           python - <<'PY'
           import csv, json, pathlib
 
+          # Eligibility gate: every target below belongs to a town already
+          # independently verified as 住居表示実施. A hyphenated string alone
+          # is never sufficient to infer block/base-number semantics.
           targets = [
               {"targetId":"YKH-TSURUMI-OFFICIAL-HIST-05","municipality":"14101","town":"獅子ケ谷三丁目","block":"10","base":"2","role":"FORMAL_ADDRESS_FRONTAGE_POINT"},
               {"targetId":"YKH-TSURUMI-OFFICIAL-HIST-07","municipality":"14101","town":"上の宮二丁目","block":"24","base":"3","role":"FORMAL_ADDRESS_FRONTAGE_POINT"},
@@ -47,7 +53,6 @@ jobs:
               {"targetId":"YKH-TSURUMI-OFFICIAL-HIST-17","municipality":"14101","town":"市場東中町","block":"3","base":"18","role":"FORMAL_ADDRESS_FRONTAGE_POINT"},
               {"targetId":"YKH-TSURUMI-OFFICIAL-HIST-19","municipality":"14101","town":"下末吉六丁目","block":"19","base":"31","role":"FORMAL_ADDRESS_FRONTAGE_POINT"},
               {"targetId":"YKH-TSURUMI-OFFICIAL-HIST-25","municipality":"14101","town":"生麦一丁目","block":"11","base":"20","role":"FORMAL_ADDRESS_FRONTAGE_POINT"},
-              {"targetId":"YKH-HODOGAYA-HIST-02","municipality":"14106","town":"天王町一丁目","block":"8","base":"12","role":"FORMAL_ADDRESS_FRONTAGE_POINT"},
               {"targetId":"YKH-MIDORI-HERITAGE-005","municipality":"14113","town":"鴨居四丁目","block":"13","base":"1","role":"FORMAL_ADDRESS_FRONTAGE_POINT"},
               {"targetId":"YKH-MIDORI-HERITAGE-014","municipality":"14113","town":"長津田六丁目","block":"21","base":"19","role":"ADDRESS_REFERENCE_FRONTAGE_POINT_NEAR_ONLY"},
           ]
@@ -57,7 +62,7 @@ jobs:
               return s.translate(str.maketrans('０１２３４５６７８９－', '0123456789-'))
 
           all_sources = {}
-          for muni in ['14101','14106','14113']:
+          for muni in ['14101','14113']:
               csvs = sorted(pathlib.Path('out', muni).rglob('*.csv'))
               if len(csvs) != 1:
                   raise SystemExit(f'Expected exactly one CSV for municipality {muni}, found {len(csvs)}')
@@ -112,10 +117,11 @@ jobs:
               })
 
           report = {
-              'schemaVersion':'VEIL_GSI_JUKYO_TARGET_PROBE_v3',
+              'schemaVersion':'VEIL_GSI_JUKYO_TARGET_PROBE_v4',
               'project':'PROJECT_VEIL',
               'sourceAuthority':'国土地理院',
               'sourceClass':'電子国土基本図（地名情報）住居表示住所',
+              'routeEligibilityGuard':'Targets must first be independently confirmed as 住居表示実施. Hyphenated address text does not establish block/base-number semantics.',
               'csvSchemaObservation':'Current municipal CSV is headerless; positional mapping uses the published/view-table order and preserves rawRow for audit.',
               'coordinateRoleGuard':'GSI base-number points are address/frontage reference points, not individual building, parcel, historical-event, or physical-feature geometry.',
               'targetCount':len(results),
