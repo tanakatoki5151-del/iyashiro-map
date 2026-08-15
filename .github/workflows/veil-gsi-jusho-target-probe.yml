@@ -39,7 +39,7 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
-          import csv, json, pathlib, re
+          import csv, json, pathlib
 
           targets = [
               {"targetId":"YKH-TSURUMI-OFFICIAL-HIST-05","municipality":"14101","town":"獅子ケ谷三丁目","block":"10","base":"2","role":"FORMAL_ADDRESS_FRONTAGE_POINT"},
@@ -55,88 +55,79 @@ jobs:
 
           def norm(v):
               s = str(v or '').strip()
-              # Normalize full-width ASCII digits only; do not rewrite Japanese identity text.
               return s.translate(str.maketrans('０１２３４５６７８９－', '0123456789-'))
-
-          def find_col(headers, needles):
-              for h in headers:
-                  nh = norm(h)
-                  if all(n in nh for n in needles):
-                      return h
-              return None
 
           all_sources = {}
           for muni in ['14101','14113']:
               csvs = sorted(pathlib.Path('out', muni).rglob('*.csv'))
-              if not csvs:
-                  raise SystemExit(f'No CSV found for municipality {muni}')
-              # Current GSI municipal ZIP should have one CSV; preserve all names for provenance.
+              if len(csvs) != 1:
+                  raise SystemExit(f'Expected exactly one CSV for municipality {muni}, found {len(csvs)}')
               source = csvs[0]
               with source.open('r', encoding='utf-8-sig', newline='') as f:
-                  reader = csv.DictReader(f)
-                  headers = reader.fieldnames or []
-                  rows = list(reader)
-              all_sources[muni] = {"csv": str(source), "headers": headers, "rows": rows}
+                  raw_rows = [r for r in csv.reader(f) if r]
+              bad_lengths = sorted(set(len(r) for r in raw_rows if len(r) < 9))
+              if bad_lengths:
+                  raise SystemExit(f'Unexpected short row lengths for {muni}: {bad_lengths}')
+              rows = []
+              for r in raw_rows:
+                  rows.append({
+                      'municipalityCode': r[0],
+                      'town': r[1],
+                      'block': r[2],
+                      'baseNumber': r[3],
+                      'readableAddressCode': r[4],
+                      'reservedOrAuxiliaryField': r[5],
+                      'longitude': r[6],
+                      'latitude': r[7],
+                      'mapInformationLevel': r[8],
+                      'rawRow': r,
+                  })
+              all_sources[muni] = {
+                  'csv': str(source),
+                  'sourceDateToken': source.stem.split('_')[-1],
+                  'rowCount': len(rows),
+                  'rows': rows,
+              }
 
           results = []
           for t in targets:
               src = all_sources[t['municipality']]
-              headers = src['headers']
-              town_col = find_col(headers, ['町']) or find_col(headers, ['字'])
-              block_col = find_col(headers, ['街区'])
-              base_col = find_col(headers, ['基礎'])
-              lon_col = find_col(headers, ['経度'])
-              lat_col = find_col(headers, ['緯度'])
-              muni_col = find_col(headers, ['市区町村','コード'])
-              if not all([town_col, block_col, base_col, lon_col, lat_col]):
-                  raise SystemExit('Required columns not identified: ' + json.dumps({
-                      'municipality':t['municipality'], 'headers':headers,
-                      'town_col':town_col,'block_col':block_col,'base_col':base_col,
-                      'lon_col':lon_col,'lat_col':lat_col,'muni_col':muni_col
-                  }, ensure_ascii=False))
-
-              matched = []
-              for row in src['rows']:
-                  if muni_col and norm(row.get(muni_col)) != t['municipality']:
-                      continue
-                  if norm(row.get(town_col)) != t['town']:
-                      continue
-                  if norm(row.get(block_col)) != t['block']:
-                      continue
-                  # Base numbers can have branches; exact target here is deliberately exact.
-                  if norm(row.get(base_col)) != t['base']:
-                      continue
-                  matched.append(row)
-
+              matched = [r for r in src['rows'] if
+                  norm(r['municipalityCode']) == t['municipality'] and
+                  norm(r['town']) == t['town'] and
+                  norm(r['block']) == t['block'] and
+                  norm(r['baseNumber']) == t['base']
+              ]
               results.append({
                   **t,
-                  "sourceZipUrl": f"https://saigai.gsi.go.jp/jusho/download/data/{t['municipality']}.zip",
-                  "sourceCsv": src['csv'],
-                  "columnMap": {"municipality":muni_col,"town":town_col,"block":block_col,"base":base_col,"lon":lon_col,"lat":lat_col},
-                  "matchCount": len(matched),
-                  "matches": matched,
-                  "directFeatureGeometryStatus": "OPEN",
-                  "publicEligible": False,
-                  "convergenceEligible": False,
-                  "scoringEffect": "none",
+                  'sourceZipUrl': f"https://saigai.gsi.go.jp/jusho/download/data/{t['municipality']}.zip",
+                  'sourceCsv': src['csv'],
+                  'sourceDateToken': src['sourceDateToken'],
+                  'municipalCsvRowCount': src['rowCount'],
+                  'matchCount': len(matched),
+                  'matches': matched,
+                  'directFeatureGeometryStatus': 'OPEN',
+                  'publicEligible': False,
+                  'convergenceEligible': False,
+                  'scoringEffect': 'none',
               })
 
           report = {
-              "schemaVersion":"VEIL_GSI_JUKYO_TARGET_PROBE_v1",
-              "project":"PROJECT_VEIL",
-              "sourceAuthority":"国土地理院",
-              "sourceClass":"電子国土基本図（地名情報）住居表示住所",
-              "coordinateRoleGuard":"GSI base-number points are address/frontage reference points, not individual building, parcel, historical-event, or physical-feature geometry.",
-              "targetCount": len(results),
-              "exactOneMatchCount": sum(r['matchCount']==1 for r in results),
-              "zeroMatchCount": sum(r['matchCount']==0 for r in results),
-              "multiMatchCount": sum(r['matchCount']>1 for r in results),
-              "results": results,
+              'schemaVersion':'VEIL_GSI_JUKYO_TARGET_PROBE_v2',
+              'project':'PROJECT_VEIL',
+              'sourceAuthority':'国土地理院',
+              'sourceClass':'電子国土基本図（地名情報）住居表示住所',
+              'csvSchemaObservation':'Current municipal CSV is headerless; positional mapping uses the published/view-table order and preserves rawRow for audit.',
+              'coordinateRoleGuard':'GSI base-number points are address/frontage reference points, not individual building, parcel, historical-event, or physical-feature geometry.',
+              'targetCount':len(results),
+              'exactOneMatchCount':sum(r['matchCount']==1 for r in results),
+              'zeroMatchCount':sum(r['matchCount']==0 for r in results),
+              'multiMatchCount':sum(r['matchCount']>1 for r in results),
+              'results':results,
           }
           pathlib.Path('report/gsi-target-report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
           print(json.dumps({k:report[k] for k in ['targetCount','exactOneMatchCount','zeroMatchCount','multiMatchCount']}, ensure_ascii=False))
           if report['zeroMatchCount'] or report['multiMatchCount']:
-              # Keep artifact, but fail closed so unresolved targets cannot be mistaken for complete.
               raise SystemExit(2)
           PY
 
