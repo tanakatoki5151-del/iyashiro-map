@@ -64,6 +64,18 @@ test("cell center round-trips to canonical cell id", () => {
   assert.equal(cellIdFromRowCol(194, 226), cellId);
 });
 
+test("off-center point uses nearest canonical center rather than floor partition", () => {
+  const g = VEIL_CANONICAL_GRID;
+  const rowFloat = 260.75;
+  const colFloat = 22.25;
+  const lat = g.originNorth - rowFloat * g.latitudeStep;
+  const lon = g.originWest + colFloat * g.longitudeStep;
+
+  // A floor-based shadow join would incorrectly assign g260-22. The canonical
+  // grid stores cell centers, so the resolver must choose the nearest center.
+  assert.deepEqual(rowColForPoint(lat, lon), { row: 261, col: 22 });
+});
+
 test("resolver returns only municipality/grid identity", () => {
   const resolver = createVeilCanonicalResolver(fixtureCatalog());
   const center = centerForCell("g194-226");
