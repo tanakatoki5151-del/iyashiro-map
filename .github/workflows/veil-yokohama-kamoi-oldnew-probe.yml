@@ -14,46 +14,49 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - name: Install PDF tools
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
-      - name: Fetch and inspect official Yokohama old-new table PDF
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils imagemagick
+      - name: Fetch and render official Yokohama old-new table PDF
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p report renders
+          mkdir -p report renders thumbs contacts
           URL='https://www.city.yokohama.lg.jp/kurashi/koseki-zei-hoken/todokede/jukyo/jisshi/20200131115946832.files/0165_20200110.pdf'
           curl --fail --location --retry 3 --retry-delay 2 "$URL" -o kamoi.pdf
           sha256sum kamoi.pdf > report/pdf-sha256.txt
           pdfinfo kamoi.pdf > report/pdfinfo.txt
           pdftotext -layout kamoi.pdf report/full.txt
+          pdftoppm -jpeg -r 55 -jpegopt quality=70 kamoi.pdf thumbs/p >/dev/null 2>&1
           python - <<'PY'
           import json, pathlib, re, subprocess
-          pdf='kamoi.pdf'
           info=pathlib.Path('report/pdfinfo.txt').read_text(errors='replace')
           m=re.search(r'^Pages:\s+(\d+)', info, re.M)
           pages=int(m.group(1)) if m else 0
-          hits=[]
-          for p in range(1,pages+1):
-              txt=subprocess.check_output(['pdftotext','-f',str(p),'-l',str(p),'-layout',pdf,'-'], text=True, errors='replace')
-              if '鴨居七丁目' in txt or ('鴨居' in txt and ('32' in txt or '三十二' in txt)):
-                  hits.append({'page':p,'text':txt})
-                  pathlib.Path(f'report/page-{p}.txt').write_text(txt,encoding='utf-8')
-                  subprocess.run(['pdftoppm','-f',str(p),'-l',str(p),'-png','-r','180',pdf,f'renders/page-{p}'],check=True)
+          text=pathlib.Path('report/full.txt').read_text(errors='replace')
+          text_layer_nonempty=bool(text.strip())
+          thumbs=sorted(pathlib.Path('thumbs').glob('p-*.jpg'))
+          # Build 5x4 contact sheets, each tile labeled with the 1-based PDF page.
+          for start in range(0,len(thumbs),20):
+              batch=thumbs[start:start+20]
+              out=pathlib.Path('contacts')/f'pages-{start+1:03d}-{start+len(batch):03d}.jpg'
+              args=['montage']+[str(p) for p in batch]+['-thumbnail','320x226','-tile','5x4','-geometry','+6+16','-pointsize','16','-set','label','%t',str(out)]
+              subprocess.run(args,check=True)
           report={
-              'schemaVersion':'VEIL_KAMOI_OLDNEW_PDF_PROBE_v1',
+              'schemaVersion':'VEIL_KAMOI_OLDNEW_PDF_PROBE_v2',
               'sourceUrl':'https://www.city.yokohama.lg.jp/kurashi/koseki-zei-hoken/todokede/jukyo/jisshi/20200131115946832.files/0165_20200110.pdf',
               'pageCount':pages,
-              'hitPages':[h['page'] for h in hits],
-              'hitCount':len(hits),
-              'targetTerms':['鴨居七丁目','32','三十二'],
-              'promotionGuard':'Text/table hit does not itself establish present-day geometry or current GSI address validity.'
+              'textLayerNonempty':text_layer_nonempty,
+              'renderedThumbCount':len(thumbs),
+              'contactSheetCount':len(list(pathlib.Path('contacts').glob('*.jpg'))),
+              'target':'visually locate 鴨居七丁目 / 32 in scanned old-new comparison tables',
+              'promotionGuard':'Visual table reading can establish historical address-table content only; current geometry remains a separate gate.'
           }
           pathlib.Path('report/probe.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
           print(json.dumps(report,ensure_ascii=False))
-          if not hits:
+          if pages != len(thumbs):
               raise SystemExit(2)
           PY
       - name: Upload PDF probe evidence
@@ -63,6 +66,6 @@ jobs:
           name: veil-kamoi-oldnew-pdf-probe
           path: |
             report/
-            renders/
+            contacts/
           if-no-files-found: error
           retention-days: 14
