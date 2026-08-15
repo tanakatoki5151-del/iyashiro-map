@@ -23,16 +23,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p out/14101 out/14113 report
-          curl --fail --location --retry 3 --retry-delay 2 \
-            'https://saigai.gsi.go.jp/jusho/download/data/14101.zip' \
-            -o out/14101.zip
-          curl --fail --location --retry 3 --retry-delay 2 \
-            'https://saigai.gsi.go.jp/jusho/download/data/14113.zip' \
-            -o out/14113.zip
-          sha256sum out/14101.zip out/14113.zip > report/archive-sha256.txt
-          unzip -q out/14101.zip -d out/14101
-          unzip -q out/14113.zip -d out/14113
+          mkdir -p out/14101 out/14106 out/14113 report
+          for code in 14101 14106 14113; do
+            curl --fail --location --retry 3 --retry-delay 2 \
+              "https://saigai.gsi.go.jp/jusho/download/data/${code}.zip" \
+              -o "out/${code}.zip"
+            unzip -q "out/${code}.zip" -d "out/${code}"
+          done
+          sha256sum out/14101.zip out/14106.zip out/14113.zip > report/archive-sha256.txt
           find out -maxdepth 3 -type f -printf '%p\n' | sort > report/archive-files.txt
 
       - name: Extract exact target base-number rows without feature promotion
@@ -49,6 +47,7 @@ jobs:
               {"targetId":"YKH-TSURUMI-OFFICIAL-HIST-17","municipality":"14101","town":"市場東中町","block":"3","base":"18","role":"FORMAL_ADDRESS_FRONTAGE_POINT"},
               {"targetId":"YKH-TSURUMI-OFFICIAL-HIST-19","municipality":"14101","town":"下末吉六丁目","block":"19","base":"31","role":"FORMAL_ADDRESS_FRONTAGE_POINT"},
               {"targetId":"YKH-TSURUMI-OFFICIAL-HIST-25","municipality":"14101","town":"生麦一丁目","block":"11","base":"20","role":"FORMAL_ADDRESS_FRONTAGE_POINT"},
+              {"targetId":"YKH-HODOGAYA-HIST-02","municipality":"14106","town":"天王町一丁目","block":"8","base":"12","role":"FORMAL_ADDRESS_FRONTAGE_POINT"},
               {"targetId":"YKH-MIDORI-HERITAGE-005","municipality":"14113","town":"鴨居四丁目","block":"13","base":"1","role":"FORMAL_ADDRESS_FRONTAGE_POINT"},
               {"targetId":"YKH-MIDORI-HERITAGE-014","municipality":"14113","town":"長津田六丁目","block":"21","base":"19","role":"ADDRESS_REFERENCE_FRONTAGE_POINT_NEAR_ONLY"},
           ]
@@ -58,7 +57,7 @@ jobs:
               return s.translate(str.maketrans('０１２３４５６７８９－', '0123456789-'))
 
           all_sources = {}
-          for muni in ['14101','14113']:
+          for muni in ['14101','14106','14113']:
               csvs = sorted(pathlib.Path('out', muni).rglob('*.csv'))
               if len(csvs) != 1:
                   raise SystemExit(f'Expected exactly one CSV for municipality {muni}, found {len(csvs)}')
@@ -113,7 +112,7 @@ jobs:
               })
 
           report = {
-              'schemaVersion':'VEIL_GSI_JUKYO_TARGET_PROBE_v2',
+              'schemaVersion':'VEIL_GSI_JUKYO_TARGET_PROBE_v3',
               'project':'PROJECT_VEIL',
               'sourceAuthority':'国土地理院',
               'sourceClass':'電子国土基本図（地名情報）住居表示住所',
