@@ -1,0 +1,72 @@
+name: VEIL Nichibunken 48 Broad Run
+
+on:
+  push:
+    branches:
+      - project-veil-address-core-v1
+    paths:
+      - 'iyashiro-map-github-vercel/veil/tools/nichibunken-48-broad-run.mjs'
+      - '.github/workflows/veil-nichibunken-48-broad-run.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recall-only-broad-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: iyashiro-map-github-vercel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run 48-municipality recall-only search
+        run: node veil/tools/nichibunken-48-broad-run.mjs
+        env:
+          VEIL_NICHIBUNKEN_OUT: veil-nichibunken-out
+
+      - name: Upload compact reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veil-nichibunken-48-reports
+          path: iyashiro-map-github-vercel/veil-nichibunken-out/reports/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload raw recall pages
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veil-nichibunken-48-raw-pages
+          path: iyashiro-map-github-vercel/veil-nichibunken-out/raw/
+          if-no-files-found: warn
+          compression-level: 6
+          retention-days: 14
+
+      - name: Fail closed on query errors
+        if: always()
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const p = 'veil-nichibunken-out/reports/nichibunken-48-summary.json';
+          if (!fs.existsSync(p)) {
+            console.error('summary missing');
+            process.exit(1);
+          }
+          const s = JSON.parse(fs.readFileSync(p, 'utf8'));
+          if (s.results?.queryErrors !== 0 || s.results?.acquired !== 48) {
+            console.error('VEIL_NICHIBUNKEN_FAIL_CLOSED=' + JSON.stringify(s.results));
+            process.exit(1);
+          }
+          console.log('VEIL_NICHIBUNKEN_GATE=PASS');
+          console.log('VEIL_NICHIBUNKEN_RESULTS=' + JSON.stringify(s.results));
+          NODE
