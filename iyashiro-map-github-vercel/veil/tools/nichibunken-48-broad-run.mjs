@@ -28,7 +28,9 @@ async function fetchWithRetry(url, attempts = 3) {
       if (res.ok) return { res, bytes };
       last = new Error(`HTTP ${res.status}`);
       if (![429,500,502,503,504].includes(res.status)) return { res, bytes };
-    } catch (e) { last = e; }
+    } catch (e) {
+      last = e;
+    }
     await sleep(1000 * (i + 1));
   }
   throw last || new Error('fetch failed');
@@ -36,52 +38,151 @@ async function fetchWithRetry(url, attempts = 3) {
 
 function parseHitCount(html) {
   const normalized = html.replace(/,/g, '');
-  const m = normalized.match(/([0-9]+)件ヒットしました/);
-  return m ? Number(m[1]) : null;
+  const hit = normalized.match(/([0-9]+)件ヒットしました/);
+  if (hit) return Number(hit[1]);
+  if (normalized.includes('に該当するページが見つかりませんでした')) return 0;
+  return null;
+}
+
+function buildContextQuery(municipalityName, prefecture, parentCity) {
+  const localName = parentCity && municipalityName.startsWith(parentCity)
+    ? municipalityName.slice(parentCity.length)
+    : municipalityName;
+  return [prefecture, parentCity, localName].filter(Boolean).join(' ');
+}
+
+function aggregate(subrows) {
+  const byRegion = {};
+  for (const r of subrows) {
+    byRegion[r.region] ||= {
+      municipalities: 0,
+      acquired: 0,
+      queryErrors: 0,
+      municipalitiesWithAtLeastOneRecallHit: 0,
+      rawHitCountSumRecallOnly: 0,
+    };
+    const s = byRegion[r.region];
+    s.municipalities++;
+    if (r.status === 'ACQUIRED_RECALL_PAGE') s.acquired++; else s.queryErrors++;
+    if (Number.isInteger(r.hitCount) && r.hitCount > 0) s.municipalitiesWithAtLeastOneRecallHit++;
+    if (Number.isInteger(r.hitCount)) s.rawHitCountSumRecallOnly += r.hitCount;
+  }
+  return {
+    queries: subrows.length,
+    acquired: subrows.filter(r => r.status === 'ACQUIRED_RECALL_PAGE').length,
+    queryErrors: subrows.filter(r => r.status !== 'ACQUIRED_RECALL_PAGE').length,
+    municipalitiesWithAtLeastOneRecallHit: new Set(subrows.filter(r => Number.isInteger(r.hitCount) && r.hitCount > 0).map(r => r.code)).size,
+    rawHitCountSumRecallOnly: subrows.reduce((a, r) => a + (Number.isInteger(r.hitCount) ? r.hitCount : 0), 0),
+    byRegion,
+  };
 }
 
 const rows = [];
-for (let i = 0; i < municipalities.length; i++) {
-  const [code, municipalityName, region, prefecture, parentCity] = municipalities[i];
-  const u = new URL(endpoint);
-  u.searchParams.set('config', '');
-  u.searchParams.set('hint', 'ひらがな');
-  u.searchParams.set('index', '');
-  u.searchParams.set('num', '100');
-  u.searchParams.set('query', municipalityName);
-  u.searchParams.set('set', '1');
-  const row = { code, municipalityName, region, prefecture, parentCity, queryType: 'F1_FULLTEXT_CURRENT_MUNICIPALITY_RECALL_ONLY', query: municipalityName, sourceURL: u.toString(), scoringEffect: 'none', directCellClaim: false, convergenceEligible: false };
-  try {
-    const { res, bytes } = await fetchWithRetry(u);
-    const html = bytes.toString('utf8');
-    const rawPath = path.join(rawDir, `${code}.html`);
-    fs.writeFileSync(rawPath, bytes);
-    Object.assign(row, { httpStatus: res.status, finalURL: res.url, bytes: bytes.length, sha256: sha256(bytes), hitCount: parseHitCount(html), rawPath, status: res.ok ? 'ACQUIRED_RECALL_PAGE' : 'HTTP_ERROR' });
-  } catch (e) {
-    Object.assign(row, { status: 'FETCH_ERROR', error: String(e?.message || e), hitCount: null });
+for (const [code, municipalityName, region, prefecture, parentCity] of municipalities) {
+  const variants = [
+    {
+      key: 'simple',
+      queryType: 'F1_SIMPLE_CURRENT_MUNICIPALITY_RECALL_ONLY',
+      query: municipalityName,
+    },
+    {
+      key: 'context',
+      queryType: 'F1_CONTEXTUAL_CURRENT_MUNICIPALITY_RECALL_ONLY',
+      query: buildContextQuery(municipalityName, prefecture, parentCity),
+    },
+  ];
+
+  for (const variant of variants) {
+    const u = new URL(endpoint);
+    u.searchParams.set('config', '');
+    u.searchParams.set('hint', 'ひらがな');
+    u.searchParams.set('index', '');
+    u.searchParams.set('num', '100');
+    u.searchParams.set('query', variant.query);
+    u.searchParams.set('set', '1');
+
+    const row = {
+      code,
+      municipalityName,
+      region,
+      prefecture,
+      parentCity,
+      queryType: variant.queryType,
+      query: variant.query,
+      sourceURL: u.toString(),
+      scoringEffect: 'none',
+      directCellClaim: false,
+      convergenceEligible: false,
+    };
+
+    try {
+      const { res, bytes } = await fetchWithRetry(u);
+      const html = bytes.toString('utf8');
+      const rawPath = path.join(rawDir, `${code}-${variant.key}.html`);
+      fs.writeFileSync(rawPath, bytes);
+      const hitCount = parseHitCount(html);
+      const status = !res.ok ? 'HTTP_ERROR' : Number.isInteger(hitCount) ? 'ACQUIRED_RECALL_PAGE' : 'PARSE_ERROR';
+      Object.assign(row, {
+        httpStatus: res.status,
+        finalURL: res.url,
+        bytes: bytes.length,
+        sha256: sha256(bytes),
+        hitCount,
+        rawPath,
+        status,
+      });
+    } catch (e) {
+      Object.assign(row, {
+        status: 'FETCH_ERROR',
+        error: String(e?.message || e),
+        hitCount: null,
+      });
+    }
+
+    rows.push(row);
+    console.log(`VEIL_NICHIBUNKEN ${variant.key} ${code} ${municipalityName} status=${row.status} hits=${row.hitCount ?? 'NA'} query=${JSON.stringify(variant.query)}`);
+    await sleep(250);
   }
-  rows.push(row);
-  console.log(`VEIL_NICHIBUNKEN ${code} ${municipalityName} status=${row.status} hits=${row.hitCount ?? 'NA'}`);
-  if (i < municipalities.length - 1) await sleep(250);
 }
 
-const byRegion = {};
-for (const r of rows) {
-  byRegion[r.region] ||= { municipalities: 0, acquired: 0, queryErrors: 0, rawHitCountSumRecallOnly: 0, unknownHitCounts: 0 };
-  const s = byRegion[r.region];
-  s.municipalities++;
-  if (r.status === 'ACQUIRED_RECALL_PAGE') s.acquired++; else s.queryErrors++;
-  if (Number.isInteger(r.hitCount)) s.rawHitCountSumRecallOnly += r.hitCount; else s.unknownHitCounts++;
-}
+const queryTypes = [...new Set(rows.map(r => r.queryType))];
+const byQueryType = Object.fromEntries(queryTypes.map(queryType => [
+  queryType,
+  aggregate(rows.filter(r => r.queryType === queryType)),
+]));
+const allQueries = aggregate(rows);
+
 const summary = {
-  buildId: 'VEIL-B17-NICHIBUNKEN-48-BROAD-RUN-v1',
+  buildId: 'VEIL-B17-NICHIBUNKEN-48-BROAD-RUN-v2',
   generatedAt: new Date().toISOString(),
-  source: { authority: '国際日本文化研究センター 怪異・妖怪伝承データベース', endpoint, mode: 'full-text recall-only', requestedPerQueryMaxDisplay: 100 },
-  contract: { municipalityCount: municipalities.length, directCellClaim: false, scoringEffect: 'none', convergenceEligible: false, note: 'Full-text municipality-name hits are discovery recall only. A hit is not location proof, not a 100m assignment, and may include current-name crosswalk text or false positives.' },
-  results: { acquired: rows.filter(r => r.status === 'ACQUIRED_RECALL_PAGE').length, queryErrors: rows.filter(r => r.status !== 'ACQUIRED_RECALL_PAGE').length, municipalitiesWithParsedHitCount: rows.filter(r => Number.isInteger(r.hitCount)).length, municipalitiesWithAtLeastOneRecallHit: rows.filter(r => Number.isInteger(r.hitCount) && r.hitCount > 0).length, rawHitCountSumRecallOnly: rows.reduce((a,r)=>a+(Number.isInteger(r.hitCount)?r.hitCount:0),0), byRegion },
-  nextGate: ['Parse/deduplicate record identities from result pages.', 'Validate prefecture/city-county fields using advanced search before geographic promotion.', 'Expand historical toponyms and place-name seeds only after F1 QA.', 'Do not assign canonical cells without independent location evidence.']
+  source: {
+    authority: '国際日本文化研究センター 怪異・妖怪伝承データベース',
+    endpoint,
+    mode: 'full-text recall-only',
+    requestedPerQueryMaxDisplay: 100,
+  },
+  contract: {
+    municipalityCount: municipalities.length,
+    queryCount: rows.length,
+    directCellClaim: false,
+    scoringEffect: 'none',
+    convergenceEligible: false,
+    note: 'Both simple and contextual full-text searches are candidate-discovery recall only. A hit is not municipality-field proof, not location proof, and not a 100m assignment.',
+  },
+  results: {
+    allQueries,
+    byQueryType,
+  },
+  nextGate: [
+    'Compare simple versus contextual recall to quantify ambiguous municipality-name inflation.',
+    'Parse/deduplicate record identities only from context-positive result pages.',
+    'Validate prefecture/city-county fields using advanced search before geographic promotion.',
+    'Expand historical toponyms and named-place seeds after F1 QA.',
+    'Do not assign canonical cells without independent location evidence.',
+  ],
 };
+
 fs.writeFileSync(path.join(reportDir, 'nichibunken-48-summary.json'), JSON.stringify(summary, null, 2));
 fs.writeFileSync(path.join(reportDir, 'nichibunken-48-results.jsonl'), rows.map(r => JSON.stringify(r)).join('\n') + '\n');
 console.log('VEIL_NICHIBUNKEN_SUMMARY=' + JSON.stringify(summary));
-if (summary.results.queryErrors > 0) process.exitCode = 1;
+if (allQueries.queryErrors > 0) process.exitCode = 1;
