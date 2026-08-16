@@ -1,0 +1,38 @@
+name: UNDERLAND B23 Official Boring XML Spec
+
+on:
+  push:
+    branches:
+      - research/underland-b22-ryumyak-b00-20260816
+    paths:
+      - .github/workflows/underland-b23-boring-spec.yml
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-spec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download official boring DTD/XML package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p official-boring-spec
+          curl -fL --retry 5 --retry-all-errors \
+            'https://www.cals-ed.go.jp/mg/wp-content/uploads/boring7.zip' \
+            -o official-boring-spec/boring7.zip
+          sha256sum official-boring-spec/boring7.zip > official-boring-spec/SHA256SUMS.txt
+          unzip -q official-boring-spec/boring7.zip -d official-boring-spec/extracted
+          find official-boring-spec/extracted -type f -print | sort > official-boring-spec/FILELIST.txt
+          grep -RIn --binary-files=without-match -E '孔内水位|水位種別|掘削状況|孔口標高|BED0300' official-boring-spec/extracted \
+            > official-boring-spec/RELEVANT_HITS.txt || true
+
+      - name: Upload official specification package
+        uses: actions/upload-artifact@v4
+        with:
+          name: UNDERLAND_B23_OFFICIAL_BORING_XML_SPEC
+          path: official-boring-spec/**
+          if-no-files-found: error
+          retention-days: 30
