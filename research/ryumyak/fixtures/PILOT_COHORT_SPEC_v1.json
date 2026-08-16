@@ -1,0 +1,81 @@
+{
+  "schemaVersion": "1.0",
+  "buildId": "ryumyak-b00-pilot-cohort-spec-20260816-v1",
+  "purpose": "Freeze a stratified, non-preference-only pilot before RYUMYAK-LENS weights or thresholds are learned.",
+  "pilotCells": 240,
+  "holdoutCells": 120,
+  "strata": [
+    {
+      "id": "P1",
+      "name": "existing_high_interest_properties_and_top_areas",
+      "n": 40,
+      "role": "decision relevance and regression fixtures",
+      "trainingUse": "description only; never majority of fitting data"
+    },
+    {
+      "id": "P2",
+      "name": "strong_iyashiro_terrain_low_hidden_water",
+      "n": 40,
+      "role": "mountain-form positive, water-memory contrast"
+    },
+    {
+      "id": "P3",
+      "name": "weak_iyashiro_terrain_strong_hidden_water_or_shallow_groundwater",
+      "n": 40,
+      "role": "dampness and water continuity contrast"
+    },
+    {
+      "id": "P4",
+      "name": "ridge_valley_node_and_severance_examples",
+      "n": 40,
+      "role": "test mountain-dragon continuity, node and artificial cut/fill"
+    },
+    {
+      "id": "P5",
+      "name": "ritual_context_examples",
+      "n": 40,
+      "role": "shrine, temple, water deity, boundary and relocation relationship tests",
+      "selectionGuard": "balance feature classes and include matched no-feature controls"
+    },
+    {
+      "id": "P6",
+      "name": "municipality_landform_random_controls",
+      "n": 40,
+      "role": "negative control and prevalence-neutral audit"
+    }
+  ],
+  "holdoutDesign": {
+    "municipalityBlocks": 48,
+    "minimumPerSelectedMunicipality": 2,
+    "landformBlocks": ["upland", "slope", "valley_bottom", "natural_levee", "backswamp", "old_channel", "reclaimed_or_filled", "coastal_lowland"],
+    "noThresholdTuningOnHoldout": true
+  },
+  "anchorFeatureFamilies": [
+    "known spring",
+    "known historical channel",
+    "known ridge or watershed divide",
+    "traditional settlement",
+    "shrine on upland or natural levee",
+    "water deity near flood or debris-flow context",
+    "ritual relocation",
+    "modern artificial severance",
+    "low-damp high-ventilation residence",
+    "high-damp low-ventilation residence"
+  ],
+  "blindProtocol": {
+    "hidePersonalSenseUntil": "proxy definition and first-pass output are frozen",
+    "hideExistingRankUntil": "feature computation complete",
+    "recordPostHoc": ["agreement", "disagreement", "physical explanation", "historical explanation", "unexplained personal resonance"]
+  },
+  "requiredOutputs": [
+    "factor matrix",
+    "multi-scale proxy outputs",
+    "ritual-distance and relationship audit",
+    "confidence and limitation codes",
+    "false-positive review",
+    "false-negative review",
+    "spatial holdout metrics",
+    "narrative explanation per anchor"
+  ],
+  "promotionGate": "No full 120,662-cell run until feature definitions, units, directions, scale aggregation, confidence and prohibited inferences pass pilot QA."
+}
