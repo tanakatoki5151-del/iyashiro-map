@@ -1,0 +1,32 @@
+name: ECOSCAPE Inspect Full-Domain Payload
+
+on:
+  push:
+    branches:
+      - research/ecoscape-moe-qa300-b13
+    paths:
+      - .github/workflows/ecoscape-inspect-full-domain-payload.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode payload
+        run: |
+          cat research/ecoscape/full_domain-payload.b64.* | tr -d '\n' | base64 --decode > /tmp/full-domain-payload.zip
+          echo "a6dea6c0a4f1167a63543c72d040ce940282d962ec3522918bf3464c5cf64ccb  /tmp/full-domain-payload.zip" | sha256sum --check
+          mkdir -p inspect
+          unzip -q /tmp/full-domain-payload.zip -d inspect/unpacked
+          find inspect/unpacked -maxdepth 5 -type f -print | sort > inspect/file-list.txt
+          cp /tmp/full-domain-payload.zip inspect/
+      - name: Upload decoded source
+        uses: actions/upload-artifact@v4
+        with:
+          name: ECOSCAPE_FULL_DOMAIN_PAYLOAD_INSPECT
+          retention-days: 7
+          path: inspect
