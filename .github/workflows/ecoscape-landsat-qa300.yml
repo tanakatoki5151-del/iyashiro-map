@@ -34,11 +34,11 @@ jobs:
       - name: Fetch cell receipts and build static facts
         run: |
           mkdir -p raw output/fetch output/replay
-          python run_landsat_qa300.py --mode fetch --workers 4 --raw-dir raw --output-dir output/fetch
+          python run_table_sample.py --mode fetch --workers 4 --raw-dir raw --output-dir output/fetch
 
       - name: Replay identical receipts
         run: |
-          python run_landsat_qa300.py --mode replay --workers 1 --raw-dir raw --output-dir output/replay
+          python run_table_sample.py --mode replay --workers 1 --raw-dir raw --output-dir output/replay
 
       - name: Verify deterministic output
         run: |
