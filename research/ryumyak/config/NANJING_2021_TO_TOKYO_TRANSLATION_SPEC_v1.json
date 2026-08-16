@@ -1,0 +1,160 @@
+{
+  "schemaVersion": "1.0",
+  "buildId": "ryumyak-b00-nanjing2021-tokyo-translation-v1",
+  "sourceStudy": {
+    "title": "Study on Feng Shui (Geomantic) Suitability Evaluation of Mausoleums in Nanjing City Based on GIS",
+    "authors": ["Jing Cui", "Yanrong Liu", "Junlin Sun", "Di Hu", "Handong He"],
+    "year": 2021,
+    "journal": "ISPRS International Journal of Geo-Information",
+    "doi": "10.3390/ijgi10110752",
+    "studyObject": "42 protected mausoleums in Nanjing urban area; 26 additional mausoleums used for validation",
+    "method": "AHP-weighted information content model with sensitivity analysis",
+    "sourceFactors": ["surface roughness", "elevation", "surface cutting depth", "surface peaks", "outfall", "river system", "slope", "aspect"],
+    "geomanticMapping": {
+      "Long": ["surface roughness", "elevation"],
+      "Sha": ["surface cutting depth", "surface peaks"],
+      "Shui": ["outfall", "river system"],
+      "Xue": ["slope", "aspect"]
+    }
+  },
+  "transferDecision": {
+    "transfer": [
+      "concept to measurable geographic factor architecture",
+      "separation of Long, Sha, Shui and Xue",
+      "factor-level sensitivity analysis",
+      "independent validation cohort",
+      "case-study explanation in addition to map output"
+    ],
+    "rebuildForTokyo": [
+      "all thresholds",
+      "all factor weights",
+      "training and validation labels",
+      "scale definitions",
+      "definition of peak and outfall",
+      "treatment of artificial terrain, culverts and buildings",
+      "residential and dampness constraints"
+    ],
+    "rejectDirectTransfer": [
+      "Nanjing absolute elevation bands",
+      "Nanjing distance buffers",
+      "mausoleum suitability as a proxy for residential suitability",
+      "random-point validation without spatial blocking",
+      "one final AHP score as the first product",
+      "the source text's slope bins written in kilometres; unit/method remains unresolved and is not transferable"
+    ]
+  },
+  "factorTranslation": [
+    {
+      "sourceFactor": "surface roughness",
+      "sourceRole": "Long",
+      "tokyoReplacement": ["multi-scale terrain ruggedness", "ridge persistence", "profile/plan curvature", "landform pattern class"],
+      "scalesM": [3000, 1000, 300],
+      "notes": "Separate natural-terrain roughness from building-height roughness."
+    },
+    {
+      "sourceFactor": "elevation",
+      "sourceRole": "Long",
+      "tokyoReplacement": ["relative elevation to neighborhood", "topographic position index", "ridge-to-valley height", "downstream clearance"],
+      "scalesM": [3000, 1000, 300, 100],
+      "notes": "Absolute elevation is weak in Tokyo; use relative position within each landform context."
+    },
+    {
+      "sourceFactor": "surface cutting depth",
+      "sourceRole": "Sha",
+      "tokyoReplacement": ["local relief", "valley depth", "terrain openness", "sky-view proxy", "left/right enclosure symmetry"],
+      "scalesM": [1000, 300],
+      "notes": "Interpret enclosure directionally rather than as undirected hill density."
+    },
+    {
+      "sourceFactor": "surface peaks",
+      "sourceRole": "Sha",
+      "tokyoReplacement": ["directional guardian highs", "ridge shoulders", "rear support high", "front desk high", "continuous ridgeline rather than nearest peak"],
+      "scalesM": [3000, 1000, 300],
+      "notes": "Tokyo has subdued uplands; local ridge shoulders can matter more than mountain peaks."
+    },
+    {
+      "sourceFactor": "outfall",
+      "sourceRole": "Shui",
+      "tokyoReplacement": ["hydrologic pour point", "valley outlet", "historical water outlet", "culvert outlet uncertainty", "property position relative to outlet"],
+      "scalesM": [1000, 300],
+      "notes": "Keep natural and artificial drainage outlets separate."
+    },
+    {
+      "sourceFactor": "river system",
+      "sourceRole": "Shui",
+      "tokyoReplacement": ["current river", "historical channel", "culvert", "spring", "well", "curve embrace", "approach/departure", "upstream/downstream", "height difference", "flood and dampness context"],
+      "scalesM": [3000, 1000, 300, 100],
+      "notes": "Distance alone is insufficient. Surface-water relation and underground continuity are different objects."
+    },
+    {
+      "sourceFactor": "slope",
+      "sourceRole": "Xue",
+      "tokyoReplacement": ["slope degrees", "local stable bench", "cut/fill", "building access", "landslide and retaining-wall context"],
+      "scalesM": [300, 100],
+      "notes": "Use degrees/percent slope and geomorphic stability; never use the source paper's kilometre-labelled bins."
+    },
+    {
+      "sourceFactor": "aspect",
+      "sourceRole": "Xue",
+      "tokyoReplacement": ["terrain aspect", "parcel orientation", "building opening orientation", "solar exposure", "prevailing wind relation"],
+      "scalesM": [300, 100],
+      "notes": "Terrain aspect and dwelling orientation are separate."
+    }
+  ],
+  "tokyoAdditionalFactors": [
+    {
+      "id": "T1",
+      "name": "ridge_network_continuity",
+      "reason": "Long is a connected morphology; nearest height alone cannot represent it."
+    },
+    {
+      "id": "T2",
+      "name": "historical_water_continuity",
+      "reason": "Tokyo's rivers and valleys are frequently culverted, filled or urbanized."
+    },
+    {
+      "id": "T3",
+      "name": "observed_groundwater_and_geology",
+      "reason": "UNDERLAND can separate historical-water symbolism from current dampness and subsurface conditions."
+    },
+    {
+      "id": "T4",
+      "name": "artificial_severance_and_cut_fill",
+      "reason": "Railways, arterial roads, excavation and embankment reshape subdued urban landforms."
+    },
+    {
+      "id": "T5",
+      "name": "shrine_temple_ritual_relation",
+      "reason": "Ritual sites may preserve settlement, boundary, water-management and disaster-memory relations; distance alone is not meaning."
+    },
+    {
+      "id": "T6",
+      "name": "dampness_ventilation_solar",
+      "reason": "The target use is housing, so symbolic suitability and practical habitability must be displayed separately."
+    }
+  ],
+  "modelingPlan": {
+    "phase0": "compute transparent factor layers without final weights",
+    "phase1": "historical-site and shrine relation analysis with matched and random controls",
+    "phase2": "spatial block validation by municipality and landform",
+    "phase3": "derive interpretable weights or non-linear relationships only after holdout evidence",
+    "phase4": "personal-sense blind comparison after proxy freeze",
+    "candidateMethods": ["information value", "regularized logistic model", "gradient boosting with SHAP", "GeoDetector", "AHP as a documented expert scenario, not the sole truth"],
+    "prohibited": ["train on current preferred neighborhoods only", "use shrine counts as automatic labels", "mix physical hazard with spiritual interpretation", "reuse Nanjing AHP weights"]
+  },
+  "outputs": [
+    "mountainDragonProxy",
+    "surfaceWaterDragonProxy",
+    "subsurfaceWaterContinuityProxy",
+    "nodeXueProxy",
+    "mingTangProxy",
+    "windShelterProxy",
+    "waterRelationProxy",
+    "severanceStagnationProxy",
+    "ritualLandMemoryContext",
+    "residentialDampPracticality",
+    "confidence",
+    "limitations"
+  ],
+  "status": "TRANSLATION_ARCHITECTURE_FROZEN__WEIGHTS_AND_THRESHOLDS_NOT_YET_TRAINED"
+}
