@@ -1,0 +1,75 @@
+name: UNDERLAND A1-BORE payload proof
+
+on:
+  push:
+    branches:
+      - agent/underland-a1-bore-probe-20260816
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  payload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch one known target tile and borehole details
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p payload/raw payload/marker payload/xml
+          BASE='https://www.kunijiban.pwri.go.jp/viewer'
+          # Kitazawa1 canonical anchor 35.66088393,139.67182963 -> z13 x7274 y3226
+          curl -k -fL --retry 3 --retry-delay 2 --max-time 90 \
+            "$BASE/server/markers.php?x=7274&y=3226&z=13" \
+            -o payload/raw/tile_13_7274_3226.json
+          python - <<'PY'
+          from pathlib import Path
+          import json, math, csv
+          p=Path('payload/raw/tile_13_7274_3226.json')
+          raw=p.read_text(errors='replace')
+          print(raw[:1000])
+          data=json.loads(raw)
+          vals=data.get('values',[]) if isinstance(data,dict) else []
+          target=(35.66088393,139.67182963)
+          def hav(a,b):
+              lat1,lon1=a; lat2,lon2=b; R=6371008.8
+              p1,p2=math.radians(lat1),math.radians(lat2)
+              dp=math.radians(lat2-lat1); dl=math.radians(lon2-lon1)
+              h=math.sin(dp/2)**2+math.cos(p1)*math.cos(p2)*math.sin(dl/2)**2
+              return 2*R*math.asin(math.sqrt(h))
+          rows=[]
+          for v in vals:
+              try:
+                  lat=float(v['latitude']); lon=float(v['longitude'])
+              except Exception:
+                  continue
+              rows.append({**v,'distance_m':round(hav(target,(lat,lon)),3)})
+          rows.sort(key=lambda x:x['distance_m'])
+          Path('payload/parsed.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2))
+          with open('payload/nearest.csv','w',newline='',encoding='utf-8') as f:
+              keys=sorted({k for r in rows for k in r.keys()}) if rows else ['id','latitude','longitude','distance_m']
+              w=csv.DictWriter(f,fieldnames=keys); w.writeheader(); w.writerows(rows)
+          Path('payload/ids.txt').write_text('\n'.join(str(r['id']) for r in rows[:20] if 'id' in r))
+          print('marker_count',len(rows))
+          print('nearest',rows[:5])
+          PY
+          while read -r id; do
+            [ -n "$id" ] || continue
+            curl -k -fL --retry 2 --retry-delay 1 --max-time 60 \
+              "$BASE/server/marker.php?id=$id" -o "payload/marker/$id.json" || true
+            curl -k -fL --retry 2 --retry-delay 1 --max-time 60 \
+              "$BASE/refer/?data=boring&type=xml&id=$id" -o "payload/xml/$id.xml" || true
+            sleep 0.25
+          done < payload/ids.txt
+          sha256sum payload/raw/* payload/marker/* payload/xml/* 2>/dev/null | sort > payload/SHA256SUMS.txt || true
+          find payload -type f -printf '%p\t%s\n' | sort > payload/inventory.tsv
+      - name: Upload payload proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: UNDERLAND_A1_BORE_PAYLOAD_PROOF_20260816
+          path: payload
+          if-no-files-found: error
+          retention-days: 7
