@@ -1,0 +1,104 @@
+name: UNDERLAND A1-BORE nearest detail XML
+
+on:
+  push:
+    branches:
+      - agent/underland-a1-bore-detail-20260816
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  detail:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch marker detail and borehole XML for 168 nearest unique IDs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p detail/marker detail/xml detail/output
+          BASE='https://www.kunijiban.pwri.go.jp/viewer'
+          python - <<'PY'
+          import pathlib,subprocess,time,json,hashlib,datetime,csv
+          root=pathlib.Path('detail')
+          ids=[x.strip() for x in pathlib.Path('research/underland/b19s/nearest_borehole_ids_168.txt').read_text().splitlines() if x.strip()]
+          rows=[]
+          for i,bid in enumerate(ids,1):
+              row={'boreholeId':bid}
+              for kind,url,outdir,ext in [
+                  ('marker',f'https://www.kunijiban.pwri.go.jp/viewer/server/marker.php?id={bid}',root/'marker','.json'),
+                  ('boring_xml',f'https://www.kunijiban.pwri.go.jp/viewer/refer/?data=boring&type=xml&id={bid}',root/'xml','.xml')]:
+                  out=outdir/f'{bid}{ext}'; tmp=pathlib.Path(str(out)+'.tmp')
+                  proc=subprocess.run(['curl','-k','-sS','-fL','--retry','2','--retry-delay','1','--connect-timeout','20','--max-time','90',url,'-o',str(tmp)])
+                  row[kind+'Exit']=proc.returncode
+                  if proc.returncode==0 and tmp.exists():
+                      b=tmp.read_bytes(); tmp.replace(out)
+                      row[kind+'Bytes']=len(b); row[kind+'Sha256']=hashlib.sha256(b).hexdigest(); row[kind+'Status']='success'
+                      if kind=='marker':
+                          try:
+                              obj=json.loads(b); row['markerApiSuccess']=obj.get('header',{}).get('success'); row['markerDataKeys']='|'.join(sorted((obj.get('data') or {}).keys()))
+                          except Exception as e: row['markerParseError']=str(e)
+                      else:
+                          s=b.lstrip().lower(); row['xmlLooksXml']=s.startswith(b'<?xml') or s.startswith(b'<')
+                  else:
+                      row[kind+'Status']='runtime_incomplete'
+                      if tmp.exists(): tmp.unlink()
+                  time.sleep(0.12)
+              rows.append(row)
+              print(f"[{i}/{len(ids)}] {bid} marker={row.get('markerStatus')} xml={row.get('boring_xmlStatus')} bytes={row.get('boring_xmlBytes')}")
+          keys=sorted({k for r in rows for k in r})
+          with open(root/'output/fetch_states.csv','w',newline='',encoding='utf-8') as f:
+              w=csv.DictWriter(f,fieldnames=keys);w.writeheader();w.writerows(rows)
+          (root/'output/fetch_states.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2))
+          PY
+      - name: Inspect XML structure and extract conservative metadata
+        shell: bash
+        run: |
+          python - <<'PY'
+          import pathlib,xml.etree.ElementTree as ET,json,csv,collections,re
+          root=pathlib.Path('detail')
+          out=[]; tagfreq=collections.Counter(); parse_fail=[]
+          for p in sorted((root/'xml').glob('*.xml')):
+              bid=p.stem; b=p.read_bytes()
+              row={'boreholeId':bid,'bytes':len(b)}
+              try:
+                  tree=ET.fromstring(b)
+                  row['rootTag']=tree.tag
+                  texts=[]
+                  for e in tree.iter():
+                      tag=e.tag.split('}')[-1]
+                      tagfreq[tag]+=1
+                      txt=(e.text or '').strip()
+                      if txt: texts.append((tag,txt))
+                  # Do not infer semantics. Capture only fields whose tag names explicitly indicate target concepts.
+                  for concept,pat in [
+                    ('surveyDate',r'(調査.*年月|調査.*日|survey.*date|date)'),
+                    ('waterLevel',r'(孔内水位|地下水位|water.*level)'),
+                    ('nValue',r'(^N値$|Ｎ値|n.?value)'),
+                    ('lithology',r'(土質|岩相|litholog|soil.*name)')]:
+                      vals=[]
+                      for tag,txt in texts:
+                          if re.search(pat,tag,re.I): vals.append({'tag':tag,'text':txt[:300]})
+                      row[concept+'ExplicitTagCount']=len(vals)
+                      row[concept+'Examples']=json.dumps(vals[:8],ensure_ascii=False)
+                  row['parseStatus']='success'
+              except Exception as e:
+                  row['parseStatus']='failed'; row['parseError']=str(e); parse_fail.append({'id':bid,'error':str(e)})
+              out.append(row)
+          keys=sorted({k for r in out for k in r}) if out else ['boreholeId']
+          with open(root/'output/xml_metadata.csv','w',newline='',encoding='utf-8') as f:
+              w=csv.DictWriter(f,fieldnames=keys);w.writeheader();w.writerows(out)
+          summary={'xmlFiles':len(out),'parseSuccess':sum(r.get('parseStatus')=='success' for r in out),'parseFailed':len(parse_fail),'topTags':tagfreq.most_common(100),'explicitConceptFileCounts':{c:sum((r.get(c+'ExplicitTagCount') or 0)>0 for r in out) for c in ['surveyDate','waterLevel','nValue','lithology']}}
+          (root/'output/xml_structure_summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2))
+          print(json.dumps(summary,ensure_ascii=False,indent=2))
+          PY
+          sha256sum detail/marker/* detail/xml/* detail/output/* | sort > detail/output/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UNDERLAND_A1_BORE_NEAREST_DETAIL_XML_20260816
+          path: detail
+          if-no-files-found: error
+          retention-days: 7
