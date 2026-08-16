@@ -1,0 +1,80 @@
+name: ECOSCAPE MOE QA300
+
+on:
+  push:
+    branches:
+      - research/ecoscape-moe-qa300-b13
+    paths:
+      - research/ecoscape/moe_qa300/**
+      - .github/workflows/ecoscape-moe-qa300.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  moe-qa300:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: research/ecoscape/moe_qa300
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install GIS runtime
+        run: python -m pip install --disable-pip-version-check requests shapely pyproj
+
+      - name: Fetch official MOE receipts and compute QA300
+        run: |
+          mkdir -p raw output/fetch output/replay
+          python run_moe_qa300.py --mode fetch --workers 4 --raw-dir raw --output-dir output/fetch
+
+      - name: Replay identical receipts
+        run: |
+          python run_moe_qa300.py --mode replay --workers 1 --raw-dir raw --output-dir output/replay
+
+      - name: Verify deterministic output
+        run: |
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          first = Path('output/fetch/MOE_FACTS_300.json').read_bytes()
+          second = Path('output/replay/MOE_FACTS_300.json').read_bytes()
+          a = hashlib.sha256(first).hexdigest()
+          b = hashlib.sha256(second).hexdigest()
+          print('fetch_sha256=', a)
+          print('replay_sha256=', b)
+          if a != b:
+              raise SystemExit('deterministic replay mismatch')
+          Path('output/DETERMINISM_SHA256.txt').write_text(a + '\n', encoding='utf-8')
+          PY
+
+      - name: Upload evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ECOSCAPE_MOE_QA300_B13
+          retention-days: 30
+          compression-level: 9
+          path: |
+            research/ecoscape/moe_qa300/raw
+            research/ecoscape/moe_qa300/output
+
+      - name: Enforce QA gate
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('output/fetch/MOE_QA_REPORT.json').read_text(encoding='utf-8'))
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          if not report.get('qaPass'):
+              raise SystemExit('MOE QA300 gate did not pass')
+          PY
