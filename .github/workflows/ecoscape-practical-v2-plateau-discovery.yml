@@ -1,0 +1,38 @@
+name: ECOSCAPE Practical V2 PLATEAU Dataset Discovery 48
+
+on:
+  push:
+    branches:
+      - research/ecoscape-moe-qa300-b13
+    paths:
+      - research/ecoscape/plateau_full_domain/discover_plateau_datasets.py
+      - .github/workflows/ecoscape-practical-v2-plateau-discovery.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecoscape-practical-v2-plateau-discovery
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install runtime
+        run: python -m pip install --disable-pip-version-check requests
+      - name: Discover official PLATEAU datasets for canonical 48 areas
+        run: python research/ecoscape/plateau_full_domain/discover_plateau_datasets.py
+      - name: Upload discovery evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ECOSCAPE_PLATEAU_DATASET_DISCOVERY_48_M1_V2
+          retention-days: 30
+          compression-level: 6
+          path: output
