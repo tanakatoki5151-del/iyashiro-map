@@ -10,7 +10,7 @@ permissions:
   contents: read
 concurrency:
   group: ecoscape-e3-landsat-moe-full-120662
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   landsat-shard:
     name: Landsat E3 shard ${{ matrix.shard }}
@@ -30,7 +30,7 @@ jobs:
           unzip -q /tmp/fd.zip -d .
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
-      - run: python -m pip install --disable-pip-version-check requests
+      - run: python -m pip install --disable-pip-version-check requests shapely pyproj
       - name: Run Landsat shard
         run: python research/ecoscape/full_domain_bulk/run_core_shard.py --source landsat --grid research/ecoscape/full_domain/canonical-grid-v10.bitset.json --shard '${{ matrix.shard }}' --workers 6 --out output/landsat/s${{ matrix.shard }}
       - uses: actions/upload-artifact@v4
@@ -60,12 +60,12 @@ jobs:
       - run: python research/ecoscape/full_domain_bulk/aggregate_core.py --source landsat --grid research/ecoscape/full_domain/canonical-grid-v10.bitset.json --input artifacts/landsat --out output/landsat-full
       - uses: actions/upload-artifact@v4
         with:
-          name: ECOSCAPE_LANDSAT_E3_FULL_120662_B80
+          name: ECOSCAPE_LANDSAT_E3_FULL_120662_B81
           retention-days: 30
           compression-level: 6
           path: output/landsat-full
   moe-shard:
-    name: MOE E3 shard ${{ matrix.shard }}
+    name: MOE Exact-Area E3 shard ${{ matrix.shard }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
@@ -81,17 +81,17 @@ jobs:
           unzip -q /tmp/fd.zip -d .
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
-      - run: python -m pip install --disable-pip-version-check requests
-      - name: Run MOE shard
+      - run: python -m pip install --disable-pip-version-check requests shapely pyproj
+      - name: Run MOE exact-area shard
         run: python research/ecoscape/full_domain_bulk/run_core_shard.py --source moe --grid research/ecoscape/full_domain/canonical-grid-v10.bitset.json --shard '${{ matrix.shard }}' --workers 6 --out output/moe/s${{ matrix.shard }}
       - uses: actions/upload-artifact@v4
         with:
-          name: ECOSCAPE_E3_MOE_S${{ matrix.shard }}
+          name: ECOSCAPE_E3_MOE_EXACT_S${{ matrix.shard }}
           retention-days: 30
           compression-level: 6
           path: output/moe
   moe-aggregate:
-    name: Aggregate MOE 120662
+    name: Aggregate MOE Exact-Area 120662
     needs: moe-shard
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -105,13 +105,13 @@ jobs:
         with: {python-version: '3.12'}
       - uses: actions/download-artifact@v4
         with:
-          pattern: ECOSCAPE_E3_MOE_S*
+          pattern: ECOSCAPE_E3_MOE_EXACT_S*
           path: artifacts/moe
           merge-multiple: true
       - run: python research/ecoscape/full_domain_bulk/aggregate_core.py --source moe --grid research/ecoscape/full_domain/canonical-grid-v10.bitset.json --input artifacts/moe --out output/moe-full
       - uses: actions/upload-artifact@v4
         with:
-          name: ECOSCAPE_MOE_E3_FULL_120662_B80
+          name: ECOSCAPE_MOE_E3_FULL_120662_B81_EXACT
           retention-days: 30
           compression-level: 6
           path: output/moe-full
