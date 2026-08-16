@@ -1,0 +1,58 @@
+name: ECOSCAPE Inspect Canonical Grid V2
+
+on:
+  push:
+    branches:
+      - research/ecoscape-moe-qa300-b13
+    paths:
+      - .github/workflows/ecoscape-inspect-grid-v2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack pinned full-domain payload
+        run: |
+          cat research/ecoscape/full_domain-payload.b64.* | tr -d '\n' | base64 --decode > /tmp/full-domain-payload.zip
+          echo "a6dea6c0a4f1167a63543c72d040ce940282d962ec3522918bf3464c5cf64ccb  /tmp/full-domain-payload.zip" | sha256sum --check
+          unzip -q /tmp/full-domain-payload.zip -d .
+      - name: Inspect canonical grid
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('research/ecoscape/full_domain/canonical-grid-v10.bitset.json')
+          obj = json.loads(p.read_text(encoding='utf-8'))
+          def summary(v, depth=0):
+              if depth > 3:
+                  return type(v).__name__
+              if isinstance(v, dict):
+                  return {k: summary(val, depth+1) for k, val in list(v.items())[:30]}
+              if isinstance(v, list):
+                  return {'type':'list','len':len(v),'sample':[summary(x, depth+1) for x in v[:3]]}
+              if isinstance(v, str):
+                  return v[:300]
+              return v
+          report = {
+              'path': str(p),
+              'sizeBytes': p.stat().st_size,
+              'topType': type(obj).__name__,
+              'summary': summary(obj),
+          }
+          Path('grid-inspection.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          PY
+      - name: Upload grid inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: ECOSCAPE_CANONICAL_GRID_INSPECTION_V2
+          retention-days: 30
+          path: |
+            grid-inspection.json
+            research/ecoscape/full_domain/canonical-grid-v10.bitset.json
