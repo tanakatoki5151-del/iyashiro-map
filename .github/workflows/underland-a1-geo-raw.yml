@@ -1,0 +1,52 @@
+name: UNDERLAND A1-GEO raw verification
+
+on:
+  push:
+    branches:
+      - agent/underland-a1-geo-raw-20260816
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download official GSJ raw VRML surfaces and verify B19B0 hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p geo_raw
+          curl -fL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 600 \
+            'https://gbank.gsj.jp/urbangeol/data/models_tokyo/Base_ToL/surfaces.wrl' \
+            -o geo_raw/Base_ToL_surfaces.wrl
+          curl -fL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 600 \
+            'https://gbank.gsj.jp/urbangeol/data/models_tokyo/Base_Al/surfaces.wrl' \
+            -o geo_raw/Base_Al_surfaces.wrl
+          stat -c '%n %s' geo_raw/*.wrl | sort | tee geo_raw/sizes.txt
+          sha256sum geo_raw/*.wrl | sort | tee geo_raw/SHA256SUMS.txt
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          expected={
+            'Base_ToL_surfaces.wrl':{'bytes':95354446,'sha256':'776c577e33d40ff18b774d0131a98f8db74f85cc678fe586b2f331a68af19b33'},
+            'Base_Al_surfaces.wrl':{'bytes':65756149,'sha256':'f9aa78a71a3810ea419e40e328179314cee9ca38d6aeb56e573c9be61c18c0b2'}
+          }
+          report={}
+          for name,e in expected.items():
+              p=Path('geo_raw')/name; b=p.read_bytes(); sha=hashlib.sha256(b).hexdigest()
+              report[name]={'bytes':len(b),'expectedBytes':e['bytes'],'sizeMatch':len(b)==e['bytes'],'sha256':sha,'expectedSha256':e['sha256'],'shaMatch':sha==e['sha256']}
+          report['allMatch']=all(v['sizeMatch'] and v['shaMatch'] for v in report.values())
+          Path('geo_raw/verification.json').write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          if not report['allMatch']: raise SystemExit('GSJ raw asset does not match B19B0 canonical hash/size')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UNDERLAND_A1_GEO_RAW_VERIFIED_20260816
+          path: geo_raw
+          if-no-files-found: error
+          retention-days: 7
