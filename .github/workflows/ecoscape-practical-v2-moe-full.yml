@@ -1,0 +1,48 @@
+name: ECOSCAPE Practical V2 MOE Full 120662
+
+on:
+  push:
+    branches:
+      - research/ecoscape-moe-qa300-b13
+    paths:
+      - research/ecoscape/practical_v2/common.py
+      - research/ecoscape/practical_v2/build_moe_level_b.py
+      - .github/workflows/ecoscape-practical-v2-moe-full.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecoscape-practical-v2-moe-full
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack canonical grid
+        run: |
+          cat research/ecoscape/full_domain-payload.b64.* | tr -d '\n' | base64 --decode > /tmp/full-domain-payload.zip
+          echo "a6dea6c0a4f1167a63543c72d040ce940282d962ec3522918bf3464c5cf64ccb  /tmp/full-domain-payload.zip" | sha256sum --check
+          unzip -q /tmp/full-domain-payload.zip -d .
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install runtime
+        run: python -m pip install --disable-pip-version-check requests pyproj shapely
+      - name: Build MOE Level B full domain
+        run: |
+          python research/ecoscape/practical_v2/build_moe_level_b.py \
+            --grid research/ecoscape/full_domain/canonical-grid-v10.bitset.json \
+            --output-dir output/moe-level-b \
+            --chunk-size 300
+      - name: Upload Drive-ready release
+        uses: actions/upload-artifact@v4
+        with:
+          name: ECOSCAPE_MOE_LEVEL_B_FULL_120662_M1_V2
+          retention-days: 30
+          compression-level: 6
+          path: output/moe-level-b
