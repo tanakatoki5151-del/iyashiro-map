@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://iyashiro-map.vercel.app/schemas/ryumyak_cell_profile.schema.json",
+  "title": "RYUMYAK-LENS Cell and Property Profile",
+  "type": "object",
+  "required": ["cellId", "propertyPoint", "scaleProfiles", "epistemicLayers", "confidence", "limitations", "provenance"],
+  "properties": {
+    "cellId": {"type": "string"},
+    "propertyPoint": {
+      "type": "object",
+      "required": ["latitude", "longitude"],
+      "properties": {
+        "latitude": {"type": "number"},
+        "longitude": {"type": "number"},
+        "buildingId": {"type": ["string", "null"]},
+        "floor": {"type": ["number", "null"]}
+      }
+    },
+    "scaleProfiles": {
+      "type": "object",
+      "properties": {
+        "regional3000m": {"$ref": "#/$defs/proxyBundle"},
+        "neighborhood1000m": {"$ref": "#/$defs/proxyBundle"},
+        "local300m": {"$ref": "#/$defs/proxyBundle"},
+        "property100m": {"$ref": "#/$defs/proxyBundle"}
+      }
+    },
+    "mountainDragonProxy": {"$ref": "#/$defs/proxyResult"},
+    "surfaceWaterDragonProxy": {"$ref": "#/$defs/proxyResult"},
+    "subsurfaceWaterContinuityProxy": {"$ref": "#/$defs/proxyResult"},
+    "nodeXueProxy": {"$ref": "#/$defs/proxyResult"},
+    "mingTangProxy": {"$ref": "#/$defs/proxyResult"},
+    "windShelterProxy": {"$ref": "#/$defs/proxyResult"},
+    "severanceStagnationProxy": {"$ref": "#/$defs/proxyResult"},
+    "residentialDampPracticality": {"$ref": "#/$defs/proxyResult"},
+    "ritualContext": {
+      "type": "object",
+      "required": ["features", "nearestByClass", "interpretationGuard"],
+      "properties": {
+        "features": {"type": "array", "items": {"$ref": "#/$defs/ritualFeatureRelation"}},
+        "nearestByClass": {"type": "object"},
+        "interpretationGuard": {"const": "distance_or_count_is_not_automatic_good_bad_or_independent_vote"}
+      }
+    },
+    "epistemicLayers": {
+      "type": "object",
+      "required": ["E1", "E2", "E3", "E4", "E5"],
+      "properties": {
+        "E1": {"type": "array", "items": {"$ref": "#/$defs/evidenceItem"}},
+        "E2": {"type": "array", "items": {"$ref": "#/$defs/evidenceItem"}},
+        "E3": {"type": "array", "items": {"$ref": "#/$defs/evidenceItem"}},
+        "E4": {"type": "array", "items": {"$ref": "#/$defs/evidenceItem"}},
+        "E5": {"type": "array", "items": {"$ref": "#/$defs/evidenceItem"}}
+      }
+    },
+    "confidence": {
+      "type": "object",
+      "required": ["class", "geometry", "epoch", "source", "model"],
+      "properties": {
+        "class": {"enum": ["high", "medium", "low", "bounded_unknown", "conflict"]},
+        "geometry": {"type": "number", "minimum": 0, "maximum": 1},
+        "epoch": {"type": "number", "minimum": 0, "maximum": 1},
+        "source": {"type": "number", "minimum": 0, "maximum": 1},
+        "model": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "limitations": {"type": "array", "items": {"type": "string"}},
+    "provenance": {"type": "array", "items": {"$ref": "#/$defs/provenanceItem"}},
+    "lastUpdated": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "proxyBundle": {
+      "type": "object",
+      "properties": {
+        "mountain": {"$ref": "#/$defs/proxyResult"},
+        "surfaceWater": {"$ref": "#/$defs/proxyResult"},
+        "subsurfaceWater": {"$ref": "#/$defs/proxyResult"},
+        "node": {"$ref": "#/$defs/proxyResult"},
+        "mingTang": {"$ref": "#/$defs/proxyResult"},
+        "windShelter": {"$ref": "#/$defs/proxyResult"},
+        "stagnation": {"$ref": "#/$defs/proxyResult"}
+      }
+    },
+    "proxyResult": {
+      "type": "object",
+      "required": ["state", "value", "confidence", "inputs", "interpretation"],
+      "properties": {
+        "state": {"enum": ["materialized", "candidate", "conflict", "bounded_unknown", "not_applicable"]},
+        "value": {},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "inputs": {"type": "array", "items": {"type": "string"}},
+        "interpretation": {"type": "string"},
+        "prohibitedInference": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "ritualFeatureRelation": {
+      "type": "object",
+      "required": ["featureId", "featureClass", "distanceM", "geometryRole", "timeScope", "identityState"],
+      "properties": {
+        "featureId": {"type": "string"},
+        "featureClass": {"type": "string"},
+        "name": {"type": ["string", "null"]},
+        "distanceM": {"type": ["number", "null"]},
+        "distanceBand": {"enum": ["inside", "0-100m", "100-300m", "300-500m", "500-1000m", "1000-3000m", "outside", "unknown"]},
+        "geometryRole": {"enum": ["current_site", "original_site", "historical_site", "uncertainty_envelope", "address_proxy", "unknown"]},
+        "timeScope": {"type": ["string", "null"]},
+        "identityState": {"enum": ["confirmed", "probable", "conflict", "unknown"]},
+        "sameRidge": {"type": ["boolean", "null"]},
+        "sameValley": {"type": ["boolean", "null"]},
+        "sameWatershed": {"type": ["boolean", "null"]},
+        "upstreamDownstream": {"enum": ["feature_upstream", "feature_downstream", "same_level", "not_applicable", "unknown"]},
+        "lineOfSight": {"type": ["boolean", "null"]},
+        "orientationToPropertyDeg": {"type": ["number", "null"]},
+        "relocated": {"type": ["boolean", "null"]},
+        "interpretation": {"type": ["string", "null"]}
+      }
+    },
+    "evidenceItem": {
+      "type": "object",
+      "required": ["evidenceId", "claim", "state", "sourceId"],
+      "properties": {
+        "evidenceId": {"type": "string"},
+        "claim": {"type": "string"},
+        "state": {"enum": ["confirmed", "candidate", "conflict", "unknown", "not_applicable"]},
+        "sourceId": {"type": "string"},
+        "geometry": {"type": ["string", "null"]},
+        "epoch": {"type": ["string", "null"]},
+        "independenceGroup": {"type": ["string", "null"]}
+      }
+    },
+    "provenanceItem": {
+      "type": "object",
+      "required": ["sourceId", "sourceVersion", "buildId"],
+      "properties": {
+        "sourceId": {"type": "string"},
+        "sourceVersion": {"type": "string"},
+        "sourceUrl": {"type": ["string", "null"]},
+        "sourceSha256": {"type": ["string", "null"]},
+        "crs": {"type": ["string", "null"]},
+        "nativeResolution": {"type": ["string", "null"]},
+        "buildId": {"type": "string"}
+      }
+    }
+  }
+}
