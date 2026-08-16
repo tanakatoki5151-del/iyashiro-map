@@ -19,7 +19,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p legacy-boring-spec/extracted
+          mkdir -p legacy-boring-spec/extracted legacy-boring-spec/flat
           curl -fL --retry 5 --retry-all-errors \
             'https://www.cals-ed.go.jp/mg/wp-content/uploads/boring.lzh' \
             -o legacy-boring-spec/boring.lzh
@@ -28,13 +28,36 @@ jobs:
           sudo apt-get install -y -qq lhasa
           lha xw=legacy-boring-spec/extracted legacy-boring-spec/boring.lzh
           find legacy-boring-spec/extracted -type f -print | sort > legacy-boring-spec/FILELIST.txt
-          grep -RIn --binary-files=without-match -E '孔内水位|水位種別|掘削状況|孔口標高|BED0300' legacy-boring-spec/extracted \
-            > legacy-boring-spec/RELEVANT_HITS.txt || true
+          find legacy-boring-spec/extracted -type f -iname 'BED0300.DTD' -exec cp '{}' legacy-boring-spec/flat/BED0300.DTD \;
+          find legacy-boring-spec/extracted -type f -iname 'BED0001.XML' -exec cp '{}' legacy-boring-spec/flat/BED0001.XML \;
+          find legacy-boring-spec/extracted -type f -iname 'BRG0150.DTD' -exec cp '{}' legacy-boring-spec/flat/BRG0150.DTD \;
+          find legacy-boring-spec/extracted -type f -iname 'BORING.XML' -exec cp '{}' legacy-boring-spec/flat/BORING.XML \;
+          python - <<'PY'
+          from pathlib import Path
+          out = []
+          for path in sorted(Path('legacy-boring-spec/flat').glob('*')):
+              data = path.read_bytes()
+              text = None
+              for enc in ('cp932','shift_jis','utf-8','utf-16le'):
+                  try:
+                      text = data.decode(enc)
+                      break
+                  except UnicodeDecodeError:
+                      pass
+              if text is None:
+                  text = data.decode('latin1', errors='replace')
+              utf8 = path.with_suffix(path.suffix + '.utf8.txt')
+              utf8.write_text(text, encoding='utf-8')
+              for i, line in enumerate(text.splitlines(), 1):
+                  if any(term in line for term in ('孔内水位','水位種別','掘削状況','孔口標高','BED0300')):
+                      out.append(f'{path.name}:{i}:{line}')
+          Path('legacy-boring-spec/RELEVANT_HITS.txt').write_text('\n'.join(out) + '\n', encoding='utf-8')
+          PY
 
       - name: Upload legacy official specification
         uses: actions/upload-artifact@v4
         with:
-          name: UNDERLAND_B23_LEGACY_BORING_XML_SPEC
+          name: UNDERLAND_B23_LEGACY_BORING_XML_SPEC_FLAT
           path: legacy-boring-spec/**
           if-no-files-found: error
           retention-days: 30
