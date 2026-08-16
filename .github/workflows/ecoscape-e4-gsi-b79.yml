@@ -1,0 +1,97 @@
+name: ECOSCAPE E4 GSI Deep QA300 B79
+
+on:
+  push:
+    branches:
+      - research/ecoscape-e4-gsi-b79
+    paths:
+      - research/ecoscape/gsi_deep_b79/**
+      - .github/workflows/ecoscape-e4-gsi-b79.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gsi-qa300:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: research/ecoscape/gsi_deep_b79
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install runtime
+        run: python -m pip install --disable-pip-version-check requests pillow numpy scikit-learn
+
+      - name: Fetch exact GSI tiles and derive QA300 features
+        run: |
+          mkdir -p raw output/fetch output/replay
+          python run_gsi_qa300.py \
+            --raw-dir raw \
+            --output-dir output/fetch \
+            --mode fetch \
+            --workers 12
+
+      - name: Replay from immutable tile bytes
+        run: |
+          python run_gsi_qa300.py \
+            --input output/fetch/ECOSCAPE_GSI_QA300_INPUT_B79.csv \
+            --raw-dir raw \
+            --output-dir output/replay \
+            --mode replay \
+            --workers 1
+
+      - name: Enforce deterministic replay and QA gate
+        run: |
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          a = Path('output/fetch/ECOSCAPE_GSI_QA300_RGB_FEATURES_B79.json').read_bytes()
+          b = Path('output/replay/ECOSCAPE_GSI_QA300_RGB_FEATURES_B79.json').read_bytes()
+          ah = hashlib.sha256(a).hexdigest()
+          bh = hashlib.sha256(b).hexdigest()
+          print('fetch=', ah)
+          print('replay=', bh)
+          if ah != bh:
+              raise SystemExit('deterministic feature replay mismatch')
+          report = json.loads(Path('output/fetch/ECOSCAPE_GSI_QA300_MODEL_REPORT_B79.json').read_text())
+          if not report.get('qaPass'):
+              raise SystemExit('GSI QA300 fetch/crop gate failed')
+          Path('output/DETERMINISM_SHA256.txt').write_text(ah + '\n', encoding='utf-8')
+          PY
+
+      - name: Build compact evidence bundle
+        run: |
+          mkdir -p release
+          cp output/fetch/ECOSCAPE_GSI_QA300_RGB_FEATURES_B79.csv release/
+          cp output/fetch/ECOSCAPE_GSI_QA300_RGB_FEATURES_B79.json release/
+          cp output/fetch/ECOSCAPE_GSI_QA300_MODEL_REPORT_B79.json release/
+          cp output/fetch/ECOSCAPE_GSI_QA300_TILE_RECEIPTS_B79.json release/
+          cp output/DETERMINISM_SHA256.txt release/
+          cp output/fetch/ECOSCAPE_GSI_QA300_INPUT_B79.csv release/
+          cp output/fetch/ECOSCAPE_GSI_QA300_INPUT_RECEIPT_B79.json release/
+          (cd release && sha256sum * > SHA256SUMS.txt)
+
+      - name: Upload compact release
+        uses: actions/upload-artifact@v4
+        with:
+          name: ECOSCAPE_E4_GSI_QA300_B79
+          retention-days: 30
+          compression-level: 9
+          path: research/ecoscape/gsi_deep_b79/release
+
+      - name: Upload raw tile receipts and bytes
+        uses: actions/upload-artifact@v4
+        with:
+          name: ECOSCAPE_E4_GSI_QA300_B79_RAW
+          retention-days: 14
+          compression-level: 6
+          path: research/ecoscape/gsi_deep_b79/raw
