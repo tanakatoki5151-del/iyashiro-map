@@ -5,7 +5,7 @@ from collections import Counter,defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import requests
-GRID_SHA='c8c822568e3313e800906665652ad040ce940282d962ec3522918bf3464c5cf64ccb'
+GRID_SHA='c8c822568e3313e800906665652e8d2f6d9dbb862d711e13b26e70ec99f03232'
 API='https://api.plateauview.mlit.go.jp/citygml/spatialid_attributes'; Z=18
 METHOD='PLATEAU_SPATIALID_LOD1_BBOX_APPROX_v1'
 def cj(x):return json.dumps(x,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
