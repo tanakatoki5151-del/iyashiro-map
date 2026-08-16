@@ -1,0 +1,57 @@
+name: UNDERLAND A1-GEO raw asset probe
+
+on:
+  push:
+    branches:
+      - agent/underland-a1-bore-probe-20260816
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Recover official Tokyo 3D basal-surface asset routes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p geo/js geo/pages
+          urls=(
+            'https://gbank.gsj.jp/urbangeol/data/models/tokyo/0708/index.html'
+            'https://gbank.gsj.jp/urbangeol/ja/explanation/index.html'
+            'https://gbank.gsj.jp/urbangeol/ja/map_tokyo/index.html'
+          )
+          i=0
+          for u in "${urls[@]}"; do
+            curl -fL --retry 3 --max-time 90 "$u" -o "geo/pages/page_$i.html"
+            i=$((i+1))
+          done
+          python - <<'PY'
+          from pathlib import Path
+          import re, urllib.parse, subprocess, json
+          bases=['https://gbank.gsj.jp/urbangeol/data/models/tokyo/0708/','https://gbank.gsj.jp/urbangeol/ja/explanation/','https://gbank.gsj.jp/urbangeol/ja/map_tokyo/']
+          allurls=[]
+          for idx,p in enumerate(sorted(Path('geo/pages').glob('*.html'))):
+              txt=p.read_text(errors='ignore'); base=bases[idx]
+              for a in re.findall(r'(?:src|href)=["\']([^"\']+)',txt,re.I):
+                  allurls.append(urllib.parse.urljoin(base,a))
+          scripts=[]
+          for u in allurls:
+              if '.js' in u.lower() and u not in scripts: scripts.append(u)
+          Path('geo/all_asset_urls.txt').write_text('\n'.join(allurls))
+          Path('geo/script_urls.txt').write_text('\n'.join(scripts))
+          for i,u in enumerate(scripts):
+              subprocess.run(['curl','-fL','--retry','2','--max-time','90',u,'-o',f'geo/js/{i:03d}.js'],check=False)
+          PY
+          grep -RniE 'Base_ToL|Base_Al|\.wrl|vrml|surface|alluv|tokyo|model|mesh|json|csv|bin|zip' geo/pages geo/js geo/all_asset_urls.txt > geo/candidate_grep.txt || true
+          find geo -type f -printf '%p\t%s\n' | sort > geo/inventory.tsv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UNDERLAND_A1_GEO_RAW_ROUTE_PROBE_20260816
+          path: geo
+          if-no-files-found: error
+          retention-days: 7
