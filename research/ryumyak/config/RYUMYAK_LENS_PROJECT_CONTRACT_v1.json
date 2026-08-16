@@ -1,0 +1,107 @@
+{
+  "schemaVersion": "1.0",
+  "projectId": "RYUMYAK-LENS",
+  "displayNameJa": "流脈レンズ／龍脈として解釈する価値がある地形・水系候補図",
+  "buildId": "ryumyak-b00-project-bootstrap-20260816-v1",
+  "projectState": "BOOTSTRAPPED_RESEARCH_ACTIVE",
+  "mission": "伝統的な龍脈・形勢論を尊重し、地形・水系・地下・祭祀・現地体感との対応を再現可能な候補図へ翻訳する。龍脈の霊的実在を否定せず、同時に計算proxyを物理的な龍脈検出と偽装しない。",
+  "canonicalUniverse": {
+    "cells": 120662,
+    "cellSizeM": 100,
+    "municipalities": 48,
+    "regions": ["東京23区", "横浜18区", "川崎7区"],
+    "sharedGridContract": "対象全域・高精細100m地形スコアカタログ v4"
+  },
+  "governance": {
+    "upperIntegrationMaster": "UNDERLAND × イヤシロチ × 龍脈Proxy 統合全体設計_v1",
+    "domainOfRecord": "RYUMYAK-LENS",
+    "readOnlyInputs": ["IYASHIRO-TERRAIN", "UNDERLAND", "LIMEN", "VEIL", "PLACEGRAPH"],
+    "writesOutsideProject": "prohibited_without_explicit_bridge",
+    "strictA4Vote": "RYUMYAK proxy and spiritual interpretation are never UNDERLAND scientific votes",
+    "scoringEffectAtBootstrap": "none"
+  },
+  "epistemicLayers": [
+    {"id": "E1", "name": "physical_observation", "examples": ["DEM", "river", "observed groundwater", "lithology", "wind", "solar", "humidity"]},
+    {"id": "E2", "name": "historical_documentation", "examples": ["classical text", "old map", "historical channel", "shrine origin", "relocation"]},
+    {"id": "E3", "name": "computational_proxy", "examples": ["ridge continuity", "enclosure", "pour point", "viewshed", "wetness", "severance"]},
+    {"id": "E4", "name": "symbolic_spiritual_interpretation", "examples": ["龍脈", "穴", "生気", "イヤシロチ", "鎮め"]},
+    {"id": "E5", "name": "personal_sense", "examples": ["軽さ", "重さ", "安心", "圧迫", "温冷", "匂い", "身体反応"]}
+  ],
+  "scaleContract": [
+    {"scaleM": 3000, "role": "regional trunk ridge, major watershed and large enclosing form"},
+    {"scaleM": 1000, "role": "neighborhood guardian ridges, enclosure, water relation and approach"},
+    {"scaleM": 300, "role": "local node, ming tang, shrine relation, dampness and severance"},
+    {"scaleM": 100, "role": "property cell and immediate building context"}
+  ],
+  "modules": [
+    {
+      "id": "M1",
+      "name": "mountain_dragon",
+      "features": ["ridge hierarchy", "ridge continuity", "direction persistence", "relative relief", "curvature", "saddle", "branching", "artificial severance"],
+      "output": "mountainDragonProxy"
+    },
+    {
+      "id": "M2",
+      "name": "surface_water_dragon",
+      "features": ["current river", "historical channel", "culvert", "spring", "valley line", "flow direction", "flow accumulation", "curve embrace", "approach/departure", "relative elevation"],
+      "output": "surfaceWaterDragonProxy"
+    },
+    {
+      "id": "M3",
+      "name": "subsurface_water_continuity",
+      "features": ["groundwater model", "observed borehole water", "hydraulic head where comparable", "geological surface", "lithology", "survey epoch"],
+      "output": "subsurfaceWaterContinuityProxy",
+      "guard": "never draw a groundwater vein from one borehole or from surface-river direction alone"
+    },
+    {
+      "id": "M4",
+      "name": "xue_node",
+      "features": ["rear support", "left/right enclosure", "front opening", "ridge/valley convergence", "stable local bench", "water relation"],
+      "output": "nodeXueProxy",
+      "guard": "candidate of form-school node, not confirmation of a spiritual dragon-hole"
+    },
+    {
+      "id": "M5",
+      "name": "mingtang_wind_shelter",
+      "features": ["front viewshed", "opening distance", "enclosure", "solar access", "prevailing wind", "ventilation possibility", "building shielding"],
+      "outputs": ["mingTangProxy", "windShelterProxy"]
+    },
+    {
+      "id": "M6",
+      "name": "severance_stagnation",
+      "features": ["ridge or valley severance", "major cut/fill", "closed depression", "old channel plus shallow observed water", "low solar", "low ventilation"],
+      "output": "severanceStagnationProxy",
+      "guard": "road, tunnel, cemetery or incident is not automatically converted into 邪気"
+    },
+    {
+      "id": "M7",
+      "name": "ritual_land_memory",
+      "features": ["shrine", "temple", "water deity", "inari", "hokora", "koshin", "boundary stone", "memorial", "relocation", "legend"],
+      "output": "ritualLandMemoryContext",
+      "guard": "ritual sites are cultural responses and historical sensors, not automatic good/bad points"
+    }
+  ],
+  "ritualDistanceContract": {
+    "distanceBandsM": [100, 300, 500, 1000, 3000],
+    "separateGeometries": ["current_site", "original_site", "historical_site", "uncertainty_envelope"],
+    "featureClasses": ["shrine", "temple", "water_deity", "dragon_deity", "inari_hokora", "koshin", "dosojin_sae", "memorial", "boundary_feature"],
+    "relationshipFields": ["same_ridge", "same_valley", "same_watershed", "upstream_downstream", "line_of_sight", "orientation_to_property", "relocated", "identity_conflict"],
+    "interpretation": "distance is only one dimension; identity, period, original/current position, landform and water relation must accompany it",
+    "automaticPositiveOrNegative": false,
+    "independentVoteByCount": false
+  },
+  "validation": {
+    "pilotBeforeFullArea": true,
+    "spatialBlockHoldout": "municipality and landform block",
+    "negativeControls": true,
+    "personalSenseBlindUntilProxyFrozen": true,
+    "metrics": ["reproducibility", "known-site correspondence", "false positive rate", "false negative review", "stability across scales", "explanation completeness"],
+    "beliefTest": "prohibited; the research validates proxy reproducibility and correspondence, not the worth of spiritual belief"
+  },
+  "siteOutput": {
+    "cards": ["physical_damp", "water_memory", "ryumyak_interpretation", "spiritual_cultural_context", "personal_sense"],
+    "requiredTraceability": ["source", "sourceVersion", "geometry", "epoch", "confidence", "limitations", "lastUpdated"],
+    "singleOpaqueSpiritualScore": "prohibited_at_v1"
+  },
+  "completionRule": "v1 is complete when definitions, inputs, algorithms, confidence, prohibited inferences, pilot fixtures and holdout validation are frozen and a third party can reproduce the same candidate map from the same inputs."
+}
