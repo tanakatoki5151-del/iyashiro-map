@@ -1,0 +1,123 @@
+name: ECOSCAPE E3 JAXA Full Domain 120662
+
+on:
+  push:
+    branches:
+      - research/ecoscape-moe-qa300-b13
+    paths:
+      - research/ecoscape/full_domain-payload.b64.*
+      - .github/workflows/ecoscape-e3-jaxa-full-domain.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecoscape-e3-jaxa-full-domain-120662
+  cancel-in-progress: false
+
+jobs:
+  shard:
+    name: JAXA E3 shard ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Unpack pinned full-domain runner
+        run: |
+          cat research/ecoscape/full_domain-payload.b64.* | tr -d '\n' | base64 --decode > /tmp/full-domain-payload.zip
+          echo "a6dea6c0a4f1167a63543c72d040ce940282d962ec3522918bf3464c5cf64ccb  /tmp/full-domain-payload.zip" | sha256sum --check
+          unzip -q /tmp/full-domain-payload.zip -d .
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install runtime
+        run: python -m pip install --disable-pip-version-check requests
+
+      - name: Run 5,000-cell shard in 125-cell checkpoints
+        id: run
+        continue-on-error: true
+        run: |
+          python research/ecoscape/full_domain/run_jaxa_shard.py \
+            --grid research/ecoscape/full_domain/canonical-grid-v10.bitset.json \
+            --shard "${{ matrix.shard }}" \
+            --chunk-size 125 \
+            --retries 8 \
+            --timeout 360 \
+            --output-dir "output/jaxa/shard-$(printf '%02d' '${{ matrix.shard }}')"
+
+      - name: Upload shard evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ECOSCAPE_E3_JAXA_S${{ matrix.shard }}
+          retention-days: 30
+          compression-level: 6
+          path: output/jaxa
+
+      - name: Enforce shard gate
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifests = list(Path('output/jaxa').rglob('JAXA_E3-S??_MANIFEST.json'))
+          if len(manifests) != 1:
+              raise SystemExit(f'expected one manifest, got {len(manifests)}')
+          report = json.loads(manifests[0].read_text(encoding='utf-8'))
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          if not report.get('qaPass'):
+              raise SystemExit('JAXA shard QA gate failed')
+          PY
+
+  aggregate:
+    name: Aggregate JAXA 120662
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Unpack pinned full-domain runner
+        run: |
+          cat research/ecoscape/full_domain-payload.b64.* | tr -d '\n' | base64 --decode > /tmp/full-domain-payload.zip
+          echo "a6dea6c0a4f1167a63543c72d040ce940282d962ec3522918bf3464c5cf64ccb  /tmp/full-domain-payload.zip" | sha256sum --check
+          unzip -q /tmp/full-domain-payload.zip -d .
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download all shard artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ECOSCAPE_E3_JAXA_S*
+          path: artifact-input
+          merge-multiple: true
+
+      - name: Aggregate and enforce 120,662-cell gate
+        run: |
+          python research/ecoscape/full_domain/aggregate_jaxa.py \
+            --grid research/ecoscape/full_domain/canonical-grid-v10.bitset.json \
+            --input-root artifact-input \
+            --output-dir output/jaxa-full
+
+      - name: Upload canonical full-domain release
+        uses: actions/upload-artifact@v4
+        with:
+          name: ECOSCAPE_JAXA_E3_FULL_120662_B21
+          retention-days: 30
+          compression-level: 6
+          path: output/jaxa-full
