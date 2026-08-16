@@ -87,6 +87,8 @@ def add(rec,d,bycoord,acc,fill):
  ba=area(*q)
  if ba<=0:return False
  roof=num(nested(rec.get('uro:buildingDetailAttribute'),'uro:buildingRoofEdgeArea'));h=num(rec.get('bldg:measuredHeight'));st=num(rec.get('bldg:storeysAboveGround'))
+ if h is not None and not (0<h<500):h=None
+ if st is not None and not (0<st<200):st=None
  sy=year(nested(rec.get('uro:buildingDetailAttribute'),'uro:surveyYear'));cy=year(rec.get('core:creationDate'));cc=nested(rec.get('uro:buildingIDAttribute'),'uro:city_code');ads=rec.get('bldg:address') if isinstance(rec.get('bldg:address'),list) else []
  if roof and roof>0:fill.append(min(1,max(.05,roof/ba)))
  cen=(rec.get('_bbox') or {}).get('center') or {};clat=num(cen.get('lat'));clon=num(cen.get('lng'));touched=False
