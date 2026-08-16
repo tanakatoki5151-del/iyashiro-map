@@ -1,0 +1,140 @@
+name: UNDERLAND A1-BORE 700 calibration
+
+on:
+  push:
+    branches:
+      - agent/underland-a1-bore-probe-20260816
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  calibrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download canonical B19O inputs from Drive
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p b19o/input b19o/raw b19o/output
+          curl -fL --retry 3 --retry-delay 2 --max-time 120 \
+            'https://drive.usercontent.google.com/download?id=1TzQZmw3yHVrYCu48g8F2RekXGq5aA10V&export=download&confirm=t' \
+            -o b19o/input/UNDERLAND_B19O_A1_BORE_700_TARGETS_v1.csv
+          curl -fL --retry 3 --retry-delay 2 --max-time 120 \
+            'https://drive.usercontent.google.com/download?id=1sBjS4FBE1GyN1jkTan3mh2pKC6_AaljN&export=download&confirm=t' \
+            -o b19o/input/UNDERLAND_B19O_KUNIJIBAN_TILE_REQUEST_MANIFEST_v1.csv
+          echo '0cbac6829d8cc730e88f4d65875fbe9a64dd76fd3fdbd8b90e033cbf131f4027  b19o/input/UNDERLAND_B19O_A1_BORE_700_TARGETS_v1.csv' | sha256sum -c -
+          echo '59d506f010e3c1bb3a9c4ea1f962500bf888c3b5e890dca9c5194dc837bb0bea  b19o/input/UNDERLAND_B19O_KUNIJIBAN_TILE_REQUEST_MANIFEST_v1.csv' | sha256sum -c -
+
+      - name: Execute 150 deduplicated KuniJiban tile requests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv, pathlib, subprocess, time, json, hashlib, datetime
+          root=pathlib.Path('b19o')
+          manifest=list(csv.DictReader(open(root/'input/UNDERLAND_B19O_KUNIJIBAN_TILE_REQUEST_MANIFEST_v1.csv',encoding='utf-8-sig')))
+          states=[]
+          for idx,r in enumerate(manifest,1):
+              out=root/'raw'/r['cacheFile']
+              url=r['url']
+              tmp=out.with_suffix(out.suffix+'.tmp')
+              cmd=['curl','-k','-sS','-fL','--retry','3','--retry-delay','1','--connect-timeout','20','--max-time','90',url,'-o',str(tmp)]
+              start=time.time(); proc=subprocess.run(cmd); elapsed=round(time.time()-start,3)
+              state={'requestOrder':int(r['requestOrder']),'x':int(r['x']),'y':int(r['y']),'z':int(r['z']),'url':url,'cacheFile':r['cacheFile'],'targetCellCount':int(r['targetCellCount']),'exitCode':proc.returncode,'elapsedSec':elapsed,'fetchedAtUTC':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+              if proc.returncode==0 and tmp.exists():
+                  b=tmp.read_bytes(); state['bytes']=len(b); state['sha256']=hashlib.sha256(b).hexdigest()
+                  try:
+                      obj=json.loads(b); state['jsonValid']=True
+                      state['apiSuccess']=bool(obj.get('header',{}).get('success'))
+                      state['markerCount']=len(obj.get('data',{}).get('values',[]) or [])
+                      state['status']='success' if state['apiSuccess'] else 'api_unsuccessful'
+                  except Exception as e:
+                      state['jsonValid']=False; state['status']='invalid_json'; state['parseError']=str(e)
+                  tmp.replace(out)
+              else:
+                  state['status']='runtime_incomplete'
+                  if tmp.exists(): tmp.unlink()
+              states.append(state)
+              print(f"[{idx}/{len(manifest)}] {r['cacheFile']} {state['status']} markers={state.get('markerCount')} bytes={state.get('bytes')}")
+              time.sleep(0.20)
+          (root/'output/request_states.json').write_text(json.dumps(states,ensure_ascii=False,indent=2))
+          with open(root/'output/request_states.csv','w',newline='',encoding='utf-8') as f:
+              keys=sorted({k for x in states for k in x}); w=csv.DictWriter(f,fieldnames=keys); w.writeheader(); w.writerows(states)
+          PY
+
+      - name: Normalize cell-to-borehole distances and calibration comparison
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,json,math,pathlib,statistics,collections
+          root=pathlib.Path('b19o')
+          targets=list(csv.DictReader(open(root/'input/UNDERLAND_B19O_A1_BORE_700_TARGETS_v1.csv',encoding='utf-8-sig')))
+          tby={r['cellId']:r for r in targets}
+          manifest=list(csv.DictReader(open(root/'input/UNDERLAND_B19O_KUNIJIBAN_TILE_REQUEST_MANIFEST_v1.csv',encoding='utf-8-sig')))
+          states={r['cacheFile']:r for r in csv.DictReader(open(root/'output/request_states.csv',encoding='utf-8'))}
+          def hav(lat1,lon1,lat2,lon2):
+              R=6371008.8; p1=math.radians(lat1); p2=math.radians(lat2)
+              dp=math.radians(lat2-lat1); dl=math.radians(lon2-lon1)
+              h=math.sin(dp/2)**2+math.cos(p1)*math.cos(p2)*math.sin(dl/2)**2
+              return 2*R*math.asin(math.sqrt(h))
+          reqs_by_cell=collections.defaultdict(list)
+          candidates={}
+          marker_ids=set()
+          for r in manifest:
+              cells=[x for x in r['targetCellIds'].split('|') if x]
+              for c in cells: reqs_by_cell[c].append(r['cacheFile'])
+              if states.get(r['cacheFile'],{}).get('status')!='success': continue
+              p=root/'raw'/r['cacheFile']
+              obj=json.loads(p.read_text(errors='replace'))
+              vals=obj.get('data',{}).get('values',[]) or []
+              for v in vals:
+                  try: lat=float(v['latitude']); lon=float(v['longitude']); mid=str(v['id'])
+                  except Exception: continue
+                  marker_ids.add(mid)
+                  for c in cells:
+                      if c not in tby: continue
+                      t=tby[c]; d=hav(float(t['latitude']),float(t['longitude']),lat,lon)
+                      if d<=500.0:
+                          k=(c,mid)
+                          row={'cellId':c,'gridIndex':t['gridIndex'],'sampleGroup':t['sampleGroup'],'calibrationStratum':t['calibrationStratum'],'prefecture':t['prefecture'],'municipality':t['municipality'],'townChome':t['townChome'],'cellLatitude':t['latitude'],'cellLongitude':t['longitude'],'boreholeId':mid,'boreholeLatitude':lat,'boreholeLongitude':lon,'distanceM':round(d,3),'band':'<=100m' if d<=100 else '<=300m' if d<=300 else '<=500m','clientClassId':v.get('client_class_id'),'approval':v.get('approval')}
+                          candidates[k]=row
+          cand=list(candidates.values()); cand.sort(key=lambda x:(x['cellId'],x['distanceM'],x['boreholeId']))
+          cby=collections.defaultdict(list)
+          for r in cand:cby[r['cellId']].append(r)
+          results=[]
+          for t in targets:
+              cid=t['cellId']; reqs=reqs_by_cell[cid]
+              rs=[states.get(x,{}) for x in reqs]
+              complete=bool(reqs) and all(x.get('status')=='success' for x in rs)
+              cc=cby[cid]
+              near=min([x['distanceM'] for x in cc],default=None)
+              results.append({'cellId':cid,'gridIndex':t['gridIndex'],'sampleGroup':t['sampleGroup'],'calibrationStratum':t['calibrationStratum'],'prefecture':t['prefecture'],'municipality':t['municipality'],'townChome':t['townChome'],'requestCount':len(reqs),'successfulRequestCount':sum(x.get('status')=='success' for x in rs),'queryComplete':complete,'queryState':'complete' if complete else 'runtime_incomplete','candidateCount500m':len(cc),'hit100m':any(x['distanceM']<=100 for x in cc),'hit300m':any(x['distanceM']<=300 for x in cc),'hit500m':bool(cc),'nearestDistanceM':near})
+          def write_csv(path,rows):
+              if not rows: path.write_text(''); return
+              keys=list(rows[0]);
+              with open(path,'w',newline='',encoding='utf-8') as f:
+                  w=csv.DictWriter(f,fieldnames=keys);w.writeheader();w.writerows(rows)
+          write_csv(root/'output/KUNIJIBAN_TARGET_CANDIDATES.csv',cand)
+          write_csv(root/'output/KUNIJIBAN_TARGET_RESULTS.csv',results)
+          groups={}
+          for g in sorted(set(r['sampleGroup'] for r in results)):
+              a=[r for r in results if r['sampleGroup']==g]
+              groups[g]={'n':len(a),'complete':sum(r['queryComplete'] for r in a),'hit100':sum(r['hit100m'] for r in a),'hit300':sum(r['hit300m'] for r in a),'hit500':sum(r['hit500m'] for r in a),'hit100Rate':sum(r['hit100m'] for r in a)/len(a),'hit300Rate':sum(r['hit300m'] for r in a)/len(a),'hit500Rate':sum(r['hit500m'] for r in a)/len(a),'meanCandidates500m':sum(r['candidateCount500m'] for r in a)/len(a)}
+          summary={'targets':len(results),'requests':len(manifest),'requestSuccess':sum(x.get('status')=='success' for x in states.values()),'completeCells':sum(r['queryComplete'] for r in results),'uniqueMarkersSeenAcrossFetchedTiles':len(marker_ids),'candidateRelationsWithin500m':len(cand),'uniqueCandidateBoreholesWithin500m':len(set(r['boreholeId'] for r in cand)),'groups':groups}
+          (root/'output/calibration_summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2))
+          print(json.dumps(summary,ensure_ascii=False,indent=2))
+          PY
+          sha256sum b19o/raw/* b19o/output/* | sort > b19o/output/SHA256SUMS.txt
+
+      - name: Upload calibration artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UNDERLAND_B19O_A1_BORE_700_EXECUTION_20260816
+          path: b19o
+          if-no-files-found: error
+          retention-days: 7
