@@ -18,7 +18,7 @@ COLLECTION = "landsat-c2-l2"
 ITEM_ID = "LC09_L2SP_107035_20250724_02_T1"
 ITEM_URL = f"https://planetarycomputer.microsoft.com/api/stac/v1/collections/{COLLECTION}/items/{ITEM_ID}"
 BUILD_ID = "ecos-practical-v2-20260817-m1-landsat-level-b-120662"
-METHOD = "ECOSCAPE_LANDSAT_SINGLE_CLEAR_SUMMER_SCENE_PIXEL_CENTER_v2"
+METHOD = "ECOSCAPE_LANDSAT_SINGLE_CLEAR_SUMMER_SCENE_PIXEL_CENTER_v3_ASSET_KEY_COMPAT"
 
 
 def pick_asset(item: pystac.Item, names: list[str], contains: list[str] | None = None) -> str:
@@ -66,7 +66,9 @@ def main() -> int:
     response=requests.get(ITEM_URL,timeout=(30,120)); response.raise_for_status(); payload=response.json(); item=pc.sign(pystac.Item.from_dict(payload))
     temp_key=pick_asset(item,["lwir11","st_b10"],["lwir","temperature"])
     qa_key=pick_asset(item,["qa_pixel"],["qa_pixel"])
-    stqa_key=pick_asset(item,["st_qa"],["st_qa"])
+    # Planetary Computer exposes the USGS ST_QA band as `qa` for current
+    # landsat-c2-l2 items, while some upstream schemas call it `st_qa`.
+    stqa_key=pick_asset(item,["st_qa","qa"],["st_qa"])
     temp_asset=item.assets[temp_key]; qa_asset=item.assets[qa_key]; stqa_asset=item.assets[stqa_key]
     temp_raw,tform,crs,temp_meta=read_domain(temp_asset.href,bbox)
     qa_raw,qa_tform,qa_crs,qa_meta=read_domain(qa_asset.href,bbox)
