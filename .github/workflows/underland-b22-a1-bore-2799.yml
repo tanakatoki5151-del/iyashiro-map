@@ -1,0 +1,70 @@
+name: UNDERLAND B22 A1-BORE 2799
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research/underland-b22-ryumyak-b00-20260816
+    paths:
+      - .github/workflows/underland-b22-a1-bore-2799.yml
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out research branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download and verify B19J 2,799-cell queue
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p research/underland/b22/input
+          curl -fL --retry 5 --retry-all-errors \
+            'https://drive.usercontent.google.com/download?id=1_0AN-DRczRVoEWMFA-tZaPxDa33Ae5OV&export=download&confirm=t' \
+            -o research/underland/b22/input/UNDERLAND_B19J_BOREHOLE_PRIORITY_QUEUE_v1.csv.gz
+          echo '72e5605815d9d26380bdd7b133bc190577e103e69edfc786b431fb2c9b91787a  research/underland/b22/input/UNDERLAND_B19J_BOREHOLE_PRIORITY_QUEUE_v1.csv.gz' | sha256sum -c -
+          gzip -dc research/underland/b22/input/UNDERLAND_B19J_BOREHOLE_PRIORITY_QUEUE_v1.csv.gz \
+            > research/underland/b22/input/UNDERLAND_B19J_BOREHOLE_PRIORITY_QUEUE_v1.csv
+          python - <<'PY'
+          import csv
+          from pathlib import Path
+          p = Path('research/underland/b22/input/UNDERLAND_B19J_BOREHOLE_PRIORITY_QUEUE_v1.csv')
+          rows = list(csv.DictReader(p.open(encoding='utf-8-sig')))
+          assert len(rows) == 2799, len(rows)
+          required = {'cellId','gridIndex','latitude','longitude','prefecture','municipality','townChome'}
+          assert required.issubset(rows[0]), sorted(required - set(rows[0]))
+          print({'rows': len(rows), 'columns': len(rows[0])})
+          PY
+
+      - name: Execute low-rate KuniJiban acquisition
+        shell: bash
+        run: |
+          set -euo pipefail
+          python research/underland/b22/run_underland_b22_a1_bore_2799.py \
+            --targets research/underland/b22/input/UNDERLAND_B19J_BOREHOLE_PRIORITY_QUEUE_v1.csv \
+            --output UNDERLAND_B22_A1_BORE_2799_EXECUTION_20260816 \
+            --delay 0.35 \
+            --detail-delay 0.25 \
+            --timeout 40 \
+            --retries 2
+
+      - name: Upload complete evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: UNDERLAND_B22_A1_BORE_2799_EXECUTION_20260816
+          path: |
+            UNDERLAND_B22_A1_BORE_2799_EXECUTION_20260816/**
+            UNDERLAND_B22_A1_BORE_2799_EXECUTION_20260816.zip
+          if-no-files-found: error
+          retention-days: 30
