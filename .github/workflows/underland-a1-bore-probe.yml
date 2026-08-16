@@ -1,0 +1,88 @@
+name: UNDERLAND A1-BORE probe
+
+on:
+  push:
+    branches:
+      - agent/underland-a1-bore-probe-20260816
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Probe KuniJiban and recover viewer endpoints
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p probe/js
+          date -u +'%Y-%m-%dT%H:%M:%SZ' > probe/run_utc.txt
+          getent hosts www.kunijiban.pwri.go.jp | tee probe/dns_www.txt || true
+          getent hosts pwjiban.pwri.go.jp | tee probe/dns_alt.txt || true
+          curl -k -L --connect-timeout 20 --max-time 60 -D probe/viewer_headers.txt -o probe/viewer.html https://www.kunijiban.pwri.go.jp/viewer/ || true
+          curl -k -L --connect-timeout 20 --max-time 60 -D probe/service_headers.txt -o probe/service.html https://www.kunijiban.pwri.go.jp/jp/service.html || true
+          python - <<'PY'
+          from pathlib import Path
+          import re, urllib.parse, subprocess, json
+          base='https://www.kunijiban.pwri.go.jp/viewer/'
+          p=Path('probe/viewer.html')
+          html=p.read_text(errors='ignore') if p.exists() else ''
+          scripts=re.findall(r'<script[^>]+src=["\']([^"\']+)', html, re.I)
+          links=re.findall(r'(?:src|href)=["\']([^"\']+)', html, re.I)
+          out=[]
+          for s in scripts:
+              u=urllib.parse.urljoin(base,s)
+              out.append(u)
+          Path('probe/script_urls.json').write_text(json.dumps(out,ensure_ascii=False,indent=2))
+          Path('probe/all_asset_urls.txt').write_text('\n'.join(urllib.parse.urljoin(base,x) for x in links))
+          for i,u in enumerate(out):
+              fn=Path('probe/js')/f'{i:03d}.js'
+              subprocess.run(['curl','-k','-L','--connect-timeout','20','--max-time','60','-o',str(fn),u],check=False)
+          PY
+          grep -RniE 'ajax|json|marker|bore|boring|column|stlist|lat|lng|bbox|bounds|geojson|xml|php|api' probe/js probe/viewer.html > probe/endpoint_grep.txt || true
+          find probe -maxdepth 2 -type f -printf '%p %s bytes\n' | sort > probe/file_inventory.txt
+
+      - name: Build endpoint candidate report
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re, json, urllib.parse
+          texts=[]
+          for p in list(Path('probe/js').glob('*.js'))+[Path('probe/viewer.html')]:
+              if p.exists():
+                  texts.append((str(p),p.read_text(errors='ignore')))
+          urls=[]
+          patterns=[
+            r'https?://[^"\'\s)]+',
+            r'["\']([^"\']+\.(?:php|json|xml)(?:\?[^"\']*)?)["\']',
+            r'["\']([^"\']*(?:ajax|marker|bore|boring|column|stlist|search)[^"\']*)["\']'
+          ]
+          for src,t in texts:
+              for pat in patterns:
+                  for m in re.finditer(pat,t,re.I):
+                      val=m.group(1) if m.lastindex else m.group(0)
+                      if len(val)>2:
+                          urls.append({'source':src,'candidate':val})
+          seen=set(); ded=[]
+          for x in urls:
+              k=x['candidate']
+              if k not in seen:
+                  seen.add(k); ded.append(x)
+          Path('probe/endpoint_candidates.json').write_text(json.dumps(ded,ensure_ascii=False,indent=2))
+          Path('probe/endpoint_candidates.txt').write_text('\n'.join(f"{x['source']}\t{x['candidate']}" for x in ded))
+          PY
+
+      - name: Upload probe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UNDERLAND_A1_BORE_PROBE_20260816
+          path: probe
+          if-no-files-found: error
+          retention-days: 7
