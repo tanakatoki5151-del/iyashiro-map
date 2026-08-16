@@ -1,0 +1,60 @@
+name: UNDERLAND A1-BORE cloud runtime
+
+on:
+  push:
+    branches:
+      - research/underland-a1-bore-cloud-20260816
+    paths:
+      - .github/workflows/underland-a1-bore-cloud.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout isolated research branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download locked Drive inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p research/underland-a1-bore-cloud/source
+          curl --fail --location --retry 3 --retry-all-errors \
+            "https://drive.usercontent.google.com/download?id=1NH9hlybiSW2Y5S1JP5EUOMRwPFU18ZDF&export=download&confirm=t" \
+            --output research/underland-a1-bore-cloud/source/UNDERLAND_B19O_COMPLETION_AND_A1_BORE_RUNNER_v1.zip
+          curl --fail --location --retry 3 --retry-all-errors \
+            "https://drive.usercontent.google.com/download?id=1QWqLUa0GYCbnTMFpb6Dyq5O9OlVHfIGk&export=download&confirm=t" \
+            --output research/underland-a1-bore-cloud/source/cloud_kunijiban_run.py
+          python -m py_compile research/underland-a1-bore-cloud/source/cloud_kunijiban_run.py
+          sha256sum research/underland-a1-bore-cloud/source/* \
+            | tee research/underland-a1-bore-cloud/source/DRIVE_SOURCE_SHA256.txt
+
+      - name: Execute endpoint discovery and B19O runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python research/underland-a1-bore-cloud/source/cloud_kunijiban_run.py \
+            --bundle research/underland-a1-bore-cloud/source/UNDERLAND_B19O_COMPLETION_AND_A1_BORE_RUNNER_v1.zip \
+            --output research/underland-a1-bore-cloud/runtime-output
+
+      - name: Upload reproducible runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: underland-a1-bore-cloud-runtime-20260816
+          path: |
+            research/underland-a1-bore-cloud/source/DRIVE_SOURCE_SHA256.txt
+            research/underland-a1-bore-cloud/runtime-output/**
+            research/underland-a1-bore-cloud/runtime-output.zip
+          if-no-files-found: error
+          retention-days: 30
