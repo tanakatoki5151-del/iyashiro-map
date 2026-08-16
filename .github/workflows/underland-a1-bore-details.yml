@@ -1,0 +1,67 @@
+name: UNDERLAND A1-BORE nearest detail acquisition
+
+on:
+  push:
+    branches:
+      - research/underland-a1-bore-cloud-20260816
+    paths:
+      - .github/workflows/underland-a1-bore-details.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquire-details:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout isolated research branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download locked Drive inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p research/underland-a1-bore-details/source
+          curl --fail --location --retry 3 --retry-all-errors \
+            "https://drive.usercontent.google.com/download?id=1DwOy3Vv_R1uLUOze1NADQHKtQlRjAiWL&export=download&confirm=t" \
+            --output research/underland-a1-bore-details/source/UNDERLAND_A1_BORE_CLOUD_RUNTIME_20260816_v1.zip
+          curl --fail --location --retry 3 --retry-all-errors \
+            "https://drive.usercontent.google.com/download?id=1jUhKCiyQ9klA8e4RSqTBG9MPtjZHxRhL&export=download&confirm=t" \
+            --output research/underland-a1-bore-details/source/acquire_kunijiban_nearest_details.py
+          python -m py_compile research/underland-a1-bore-details/source/acquire_kunijiban_nearest_details.py
+          find research/underland-a1-bore-details/source -maxdepth 1 -type f -print0 \
+            | sort -z \
+            | xargs -0 sha256sum \
+            | tee research/underland-a1-bore-details/source/DRIVE_SOURCE_SHA256.txt
+
+      - name: Acquire official marker metadata and source-native files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python research/underland-a1-bore-details/source/acquire_kunijiban_nearest_details.py \
+            --runtime-zip research/underland-a1-bore-details/source/UNDERLAND_A1_BORE_CLOUD_RUNTIME_20260816_v1.zip \
+            --output research/underland-a1-bore-details/runtime-output \
+            --delay 0.20 \
+            --timeout 35 \
+            --retries 2
+          cd research/underland-a1-bore-details
+          zip -q -r runtime-output.zip runtime-output
+
+      - name: Upload reproducible detail evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: underland-a1-bore-nearest-details-20260816
+          path: |
+            research/underland-a1-bore-details/source/DRIVE_SOURCE_SHA256.txt
+            research/underland-a1-bore-details/runtime-output/**
+            research/underland-a1-bore-details/runtime-output.zip
+          if-no-files-found: error
+          retention-days: 30
