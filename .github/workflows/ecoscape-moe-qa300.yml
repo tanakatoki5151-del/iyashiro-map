@@ -31,33 +31,14 @@ jobs:
       - name: Install GIS runtime
         run: python -m pip install --disable-pip-version-check requests shapely pyproj
 
-      - name: Inspect locked aggregate payload shape
-        run: |
-          python - <<'PY'
-          import base64, gzip, json, requests
-          aggregate = requests.get('https://ecoscape-qa300-aggregate.vercel.app/api/aggregate', timeout=90).json()
-          payload = json.loads(gzip.decompress(base64.b64decode(aggregate['payloadBase64'])))
-          print('aggregate_keys=', sorted(aggregate.keys()))
-          print('payload_type=', type(payload).__name__)
-          if isinstance(payload, dict):
-              print('payload_keys=', sorted(payload.keys()))
-              for key, value in payload.items():
-                  shape = (type(value).__name__, len(value) if hasattr(value, '__len__') else None)
-                  print('child=', key, shape)
-          elif isinstance(payload, list):
-              print('payload_len=', len(payload))
-              print('first_type=', type(payload[0]).__name__ if payload else None)
-          print('payload_preview=', json.dumps(payload, ensure_ascii=False)[:8000])
-          PY
-
       - name: Fetch official MOE receipts and compute QA300
         run: |
           mkdir -p raw output/fetch output/replay
-          python run_moe_qa300.py --mode fetch --workers 4 --raw-dir raw --output-dir output/fetch
+          python run_table_sample.py --mode fetch --workers 4 --raw-dir raw --output-dir output/fetch
 
       - name: Replay identical receipts
         run: |
-          python run_moe_qa300.py --mode replay --workers 1 --raw-dir raw --output-dir output/replay
+          python run_table_sample.py --mode replay --workers 1 --raw-dir raw --output-dir output/replay
 
       - name: Verify deterministic output
         run: |
