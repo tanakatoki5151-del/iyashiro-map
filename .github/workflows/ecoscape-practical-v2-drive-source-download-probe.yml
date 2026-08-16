@@ -1,0 +1,49 @@
+name: ECOSCAPE Practical V2 Drive Source Download Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/ecoscape-moe-qa300-b13]
+    paths:
+      - .github/workflows/ecoscape-practical-v2-drive-source-download-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check gdown
+      - name: Download physical Drive inputs
+        run: |
+          mkdir -p input output
+          gdown --id 1BS_fQCVrROTXVSbFS9wesZPZWKge5y4E -O input/B85.zip
+          gdown --id 1BfgNZszd0-OIF32NgCVtbGni-_l-TGe9 -O input/LANDSAT.zip
+          gdown --id 15PvSEGcWN0cLR3_3-WBPRLWLY-JHpBRG -O input/MOE.zip
+          unzip -t input/B85.zip
+          unzip -t input/LANDSAT.zip
+          unzip -t input/MOE.zip
+          sha256sum input/*.zip | tee output/SHA256SUMS.txt
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          files=[]
+          for p in sorted(Path('input').glob('*.zip')):
+              files.append({'name':p.name,'bytes':p.stat().st_size})
+          result={'buildId':'ecos-practical-v2-20260817-b98-drive-input-probe','files':files,'count':len(files),'qaPass':len(files)==3}
+          Path('output/DRIVE_SOURCE_DOWNLOAD_PROBE.json').write_text(json.dumps(result,ensure_ascii=False,indent=2))
+          print(json.dumps(result,ensure_ascii=False,indent=2))
+          assert result['qaPass']
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ECOSCAPE_DRIVE_SOURCE_DOWNLOAD_PROBE_B98
+          retention-days: 30
+          path: output
