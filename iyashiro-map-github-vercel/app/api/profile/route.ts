@@ -18,8 +18,10 @@ type GsiFeature = {
 
 async function resolveQuery(request: NextRequest) {
   const q = request.nextUrl.searchParams.get("q")?.trim() ?? "";
-  const lat = Number(request.nextUrl.searchParams.get("lat"));
-  const lng = Number(request.nextUrl.searchParams.get("lng"));
+  const latParam = request.nextUrl.searchParams.get("lat");
+  const lngParam = request.nextUrl.searchParams.get("lng");
+  const lat = latParam === null ? Number.NaN : Number(latParam);
+  const lng = lngParam === null ? Number.NaN : Number(lngParam);
   if (Number.isFinite(lat) && Number.isFinite(lng)) {
     return { query: q || null, matchedAddress: null as string | null, lat, lng };
   }
