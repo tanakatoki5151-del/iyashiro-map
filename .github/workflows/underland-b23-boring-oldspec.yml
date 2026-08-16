@@ -1,0 +1,40 @@
+name: UNDERLAND B23 Legacy Boring XML Spec
+
+on:
+  push:
+    branches:
+      - research/underland-b22-ryumyak-b00-20260816
+    paths:
+      - .github/workflows/underland-b23-boring-oldspec.yml
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-legacy-spec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download and extract official H20 legacy package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p legacy-boring-spec/extracted
+          curl -fL --retry 5 --retry-all-errors \
+            'https://www.cals-ed.go.jp/mg/wp-content/uploads/boring.lzh' \
+            -o legacy-boring-spec/boring.lzh
+          sha256sum legacy-boring-spec/boring.lzh > legacy-boring-spec/SHA256SUMS.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq lhasa
+          lha xw=legacy-boring-spec/extracted legacy-boring-spec/boring.lzh
+          find legacy-boring-spec/extracted -type f -print | sort > legacy-boring-spec/FILELIST.txt
+          grep -RIn --binary-files=without-match -E '孔内水位|水位種別|掘削状況|孔口標高|BED0300' legacy-boring-spec/extracted \
+            > legacy-boring-spec/RELEVANT_HITS.txt || true
+
+      - name: Upload legacy official specification
+        uses: actions/upload-artifact@v4
+        with:
+          name: UNDERLAND_B23_LEGACY_BORING_XML_SPEC
+          path: legacy-boring-spec/**
+          if-no-files-found: error
+          retention-days: 30
