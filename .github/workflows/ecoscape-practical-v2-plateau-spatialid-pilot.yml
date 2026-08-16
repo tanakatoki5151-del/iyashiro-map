@@ -1,0 +1,67 @@
+name: ECOSCAPE Practical V2 PLATEAU Spatial ID Pilot
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/ecoscape-moe-qa300-b13]
+    paths:
+      - research/ecoscape/plateau_full_domain/run_plateau_spatialid_shard.py
+      - .github/workflows/ecoscape-practical-v2-plateau-spatialid-pilot.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecoscape-plateau-spatialid-pilot
+  cancel-in-progress: true
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack canonical grid
+        run: |
+          cat research/ecoscape/full_domain-payload.b64.* | tr -d '\n' | base64 --decode > /tmp/fd.zip
+          echo 'a6dea6c0a4f1167a63543c72d040ce940282d962ec3522918bf3464c5cf64ccb  /tmp/fd.zip' | sha256sum --check
+          unzip -q /tmp/fd.zip -d .
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check requests
+      - name: First 500-cell run
+        run: python research/ecoscape/plateau_full_domain/run_plateau_spatialid_shard.py --grid research/ecoscape/full_domain/canonical-grid-v10.bitset.json --shard 1 --limit 500 --workers 2 --batch-size 16 --out output/run1
+      - name: Exact rerun
+        run: python research/ecoscape/plateau_full_domain/run_plateau_spatialid_shard.py --grid research/ecoscape/full_domain/canonical-grid-v10.bitset.json --shard 1 --limit 500 --workers 2 --batch-size 16 --out output/run2
+      - name: Compare deterministic facts
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          a=json.loads(Path('output/run1/PLATEAU_E3_S01_AUDIT.json').read_text())
+          b=json.loads(Path('output/run2/PLATEAU_E3_S01_AUDIT.json').read_text())
+          result={
+            'buildId':'ecos-practical-v2-20260817-b97-plateau-spatialid-pilot500',
+            'cells':500,
+            'firstFactsSha256':a['factsSha256'],
+            'rerunFactsSha256':b['factsSha256'],
+            'factsEqual':a['factsSha256']==b['factsSha256'],
+            'firstQaPass':a['qaPass'],
+            'rerunQaPass':b['qaPass'],
+            'firstRequestFailures':a['requestFailures'],
+            'rerunRequestFailures':b['requestFailures'],
+            'approximationClass':a['approximationClass'],
+            'scoringEffect':'none'
+          }
+          Path('output/PILOT_COMPARISON.json').write_text(json.dumps(result,ensure_ascii=False,indent=2))
+          print(json.dumps(result,ensure_ascii=False,indent=2))
+          assert result['factsEqual'] and result['firstQaPass'] and result['rerunQaPass']
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ECOSCAPE_PLATEAU_SPATIALID_PILOT500_B97
+          retention-days: 30
+          compression-level: 6
+          path: output
