@@ -23,9 +23,9 @@ jobs:
       - name: Download physical Drive inputs
         run: |
           mkdir -p input output
-          gdown --id 1BS_fQCVrROTXVSbFS9wesZPZWKge5y4E -O input/B85.zip
-          gdown --id 1BfgNZszd0-OIF32NgCVtbGni-_l-TGe9 -O input/LANDSAT.zip
-          gdown --id 15PvSEGcWN0cLR3_3-WBPRLWLY-JHpBRG -O input/MOE.zip
+          gdown 1BS_fQCVrROTXVSbFS9wesZPZWKge5y4E -O input/B85.zip
+          gdown 1BfgNZszd0-OIF32NgCVtbGni-_l-TGe9 -O input/LANDSAT.zip
+          gdown 15PvSEGcWN0cLR3_3-WBPRLWLY-JHpBRG -O input/MOE.zip
           unzip -t input/B85.zip
           unzip -t input/LANDSAT.zip
           unzip -t input/MOE.zip
