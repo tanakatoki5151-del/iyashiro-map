@@ -1,0 +1,86 @@
+name: ECOSCAPE Practical V2 PLATEAU Spatial ID Full Domain
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/ecoscape-moe-qa300-b13]
+    paths:
+      - research/ecoscape/plateau_full_domain/run_plateau_spatialid_shard.py
+      - research/ecoscape/plateau_full_domain/aggregate_plateau_spatialid.py
+      - .github/workflows/ecoscape-practical-v2-plateau-spatialid-full.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecoscape-plateau-spatialid-full-domain
+  cancel-in-progress: false
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack canonical grid
+        run: |
+          cat research/ecoscape/full_domain-payload.b64.* | tr -d '\n' | base64 --decode > /tmp/fd.zip
+          echo 'a6dea6c0a4f1167a63543c72d040ce940282d962ec3522918bf3464c5cf64ccb  /tmp/fd.zip' | sha256sum --check
+          unzip -q /tmp/fd.zip -d .
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check requests
+      - name: Compute PLATEAU practical urban form
+        run: python research/ecoscape/plateau_full_domain/run_plateau_spatialid_shard.py --grid research/ecoscape/full_domain/canonical-grid-v10.bitset.json --shard ${{ matrix.shard }} --workers 2 --batch-size 16 --retries 4 --out output
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: PLATEAU_SPATIALID_SHARD_${{ matrix.shard }}
+          retention-days: 30
+          compression-level: 6
+          path: output
+
+  aggregate:
+    needs: shard
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack canonical grid
+        run: |
+          cat research/ecoscape/full_domain-payload.b64.* | tr -d '\n' | base64 --decode > /tmp/fd.zip
+          echo 'a6dea6c0a4f1167a63543c72d040ce940282d962ec3522918bf3464c5cf64ccb  /tmp/fd.zip' | sha256sum --check
+          unzip -q /tmp/fd.zip -d .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: PLATEAU_SPATIALID_SHARD_*
+          path: all-shards
+          merge-multiple: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Aggregate and audit 120,662 cells
+        run: python research/ecoscape/plateau_full_domain/aggregate_plateau_spatialid.py --grid research/ecoscape/full_domain/canonical-grid-v10.bitset.json --input all-shards --out release
+      - name: Build release ZIP
+        run: |
+          cd release
+          zip -9 -r ../ECOSCAPE_PLATEAU_PRACTICAL_FULL_120662_B98.zip .
+          cd ..
+          sha256sum ECOSCAPE_PLATEAU_PRACTICAL_FULL_120662_B98.zip > ECOSCAPE_PLATEAU_PRACTICAL_FULL_120662_B98.zip.sha256
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ECOSCAPE_PLATEAU_PRACTICAL_FULL_120662_B98
+          retention-days: 30
+          compression-level: 0
+          path: |
+            ECOSCAPE_PLATEAU_PRACTICAL_FULL_120662_B98.zip
+            ECOSCAPE_PLATEAU_PRACTICAL_FULL_120662_B98.zip.sha256
+            release
