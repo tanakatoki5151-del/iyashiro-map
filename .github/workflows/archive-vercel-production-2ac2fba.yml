@@ -45,16 +45,23 @@ jobs:
         working-directory: iyashiro-map-github-vercel
         run: npm ci
 
-      - name: Lint
+      - name: Lint audit
+        id: lint
+        continue-on-error: true
         working-directory: iyashiro-map-github-vercel
         run: npm run lint
 
-      - name: Production build
+      - name: Production build audit
+        id: build
+        continue-on-error: true
         working-directory: iyashiro-map-github-vercel
         run: npm run build
 
       - name: Build immutable source archive and restore bundle
         shell: bash
+        env:
+          LINT_OUTCOME: ${{ steps.lint.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
         run: |
           set -euo pipefail
           mkdir -p snapshot
@@ -137,8 +144,9 @@ jobs:
               },
               "verification": {
                   "npmCi": "passed",
-                  "lint": "passed",
-                  "productionBuild": "passed",
+                  "lint": os.environ.get("LINT_OUTCOME", "unknown"),
+                  "productionBuild": os.environ.get("BUILD_OUTCOME", "unknown"),
+                  "note": "Validation outcomes are recorded rather than hidden; archive creation remains fail-open for preservation only.",
               },
               "environmentVariableKeysReferencedByTrackedSource": sorted(env_keys),
               "security": {
