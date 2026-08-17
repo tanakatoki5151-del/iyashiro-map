@@ -1,102 +1,81 @@
-name: ECOSCAPE Runtime Inspect
+name: Assemble ECOSCAPE B120 Runtime
 
 on:
   push:
     branches:
       - agent/connect-ecoscape-b120-runtime
     paths:
-      - 'iyashiro-map-github-vercel/app/lib/location-profile/ecoscape-runtime-chunk-*.ts'
-      - '.github/workflows/ecoscape-runtime-inspect.yml'
+      - 'iyashiro-map-github-vercel/.ecoscape-payload/READY'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  inspect-runtime:
+  assemble-verify-commit:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Inspect staged runtime
-        shell: bash
-        run: |
-          node <<'NODE'
-          const fs = require('node:fs');
-          const path = require('node:path');
-          const zlib = require('node:zlib');
-          const crypto = require('node:crypto');
-
-          const base = path.join(process.cwd(), 'iyashiro-map-github-vercel', 'app', 'lib', 'location-profile');
-          const output = path.join(process.cwd(), 'ecoscape-runtime-inspection');
-          fs.mkdirSync(output, { recursive: true });
-
-          const chunkBuffers = [];
-          const chunks = [];
-          for (let index = 0; index < 4; index += 1) {
-            const file = path.join(base, `ecoscape-runtime-chunk-${index}.ts`);
-            const source = fs.readFileSync(file, 'utf8');
-            const match = source.match(/export default\s+"([A-Za-z0-9+/=]+)";/s);
-            if (!match) throw new Error(`Unable to parse ${file}`);
-            const bytes = Buffer.from(match[1], 'base64');
-            chunkBuffers.push(bytes);
-            chunks.push({ index, encodedChars: match[1].length, decodedBytes: bytes.length });
-          }
-
-          const gzip = Buffer.concat(chunkBuffers);
-          fs.writeFileSync(path.join(output, 'staged-runtime.gzip'), gzip);
-          let raw = null;
-          let strictError = null;
-          try { raw = zlib.gunzipSync(gzip); }
-          catch (error) {
-            strictError = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-            try { raw = zlib.gunzipSync(gzip, { finishFlush: zlib.constants.Z_SYNC_FLUSH }); } catch {}
-          }
-          if (raw) fs.writeFileSync(path.join(output, 'staged-runtime.partial.raw'), raw);
-          const metadata = {
-            chunks,
-            gzipBytes: gzip.length,
-            gzipSha256: crypto.createHash('sha256').update(gzip).digest('hex'),
-            strictError,
-            partialRecoverySucceeded: raw !== null,
-            partialRawBytes: raw?.length ?? null,
-            partialRawSha256: raw ? crypto.createHash('sha256').update(raw).digest('hex') : null,
-          };
-          fs.writeFileSync(path.join(output, 'staged-runtime-metadata.json'), JSON.stringify(metadata, null, 2));
-          console.log(JSON.stringify(metadata, null, 2));
-          NODE
-
-      - name: Probe canonical B120 Drive bundle
-        shell: bash
-        run: |
-          set +e
-          python -m pip install --disable-pip-version-check -q gdown
-          gdown --id 1qOqlGpY3iZK-kSuuqr7QaTpWJnslvNaI -O ecoscape-runtime-inspection/ECOSCAPE_MW4_PROPERTY_PROFILE_ADAPTER_B120.zip
-          code=$?
-          python <<'PY'
-          import hashlib, json, os, zipfile
-          path = 'ecoscape-runtime-inspection/ECOSCAPE_MW4_PROPERTY_PROFILE_ADAPTER_B120.zip'
-          result = {'exists': os.path.exists(path), 'size': os.path.getsize(path) if os.path.exists(path) else None}
-          if os.path.exists(path):
-              with open(path, 'rb') as f:
-                  result['sha256'] = hashlib.sha256(f.read()).hexdigest()
-              try:
-                  with zipfile.ZipFile(path) as z:
-                      result['zipOk'] = z.testzip() is None
-                      result['members'] = z.namelist()
-              except Exception as exc:
-                  result['zipOk'] = False
-                  result['error'] = repr(exc)
-          with open('ecoscape-runtime-inspection/drive-download-probe.json', 'w') as f:
-              json.dump(result, f, ensure_ascii=False, indent=2)
-          print(json.dumps(result, ensure_ascii=False, indent=2))
-          PY
-          exit 0
-
-      - name: Upload inspection
-        uses: actions/upload-artifact@v4
         with:
-          name: ecoscape-runtime-inspection
-          path: ecoscape-runtime-inspection
-          if-no-files-found: error
-          retention-days: 7
+          fetch-depth: 0
+          ref: agent/connect-ecoscape-b120-runtime
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+          cache: npm
+          cache-dependency-path: iyashiro-map-github-vercel/package-lock.json
+
+      - name: Reassemble the verified payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          project='iyashiro-map-github-vercel'
+          payload="$project/.ecoscape-payload"
+          work="$RUNNER_TEMP/ecoscape-b120-runtime"
+          mkdir -p "$work"
+          find "$payload" -maxdepth 1 -type f -name 'part-*' -print0 \
+            | sort -z \
+            | xargs -0 cat > "$work/payload.b64"
+          printf '%s  %s\n' \
+            '816ba613c235c9276dc97eba7043a5d507e72aff86aca451679d74b634f7b683' \
+            "$work/payload.b64" | sha256sum -c -
+          base64 --decode "$work/payload.b64" > "$work/payload.tar.gz"
+          printf '%s  %s\n' \
+            'd36eaceb20321e490451ff98f401ebb7e97d9f01203c5788716f3aad4826ea11' \
+            "$work/payload.tar.gz" | sha256sum -c -
+          mkdir -p "$work/extracted"
+          tar -xzf "$work/payload.tar.gz" -C "$work/extracted"
+
+      - name: Install the runtime, adapter, API and regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          project='iyashiro-map-github-vercel'
+          src="$RUNNER_TEMP/ecoscape-b120-runtime/extracted"
+          cp "$src"/ecoscape-runtime-chunk-*.ts "$project/app/lib/location-profile/"
+          cp "$src/ecoscape-runtime.ts" "$project/app/lib/location-profile/ecoscape-runtime.ts"
+          cp "$src/ecoscape-adapter.ts" "$project/app/lib/location-profile/ecoscape-adapter.ts"
+          cp "$src/route.ts" "$project/app/api/profile/route.ts"
+          cp "$src/rendered-html.test.mjs" "$project/tests/rendered-html.test.mjs"
+          cp "$src/ECOSCAPE_B120_RUNTIME_INTEGRATION_20260817.md" \
+            "$project/docs/ECOSCAPE_B120_RUNTIME_INTEGRATION_20260817.md"
+          rm -rf "$project/.ecoscape-payload"
+
+      - name: Build and run regression tests
+        working-directory: iyashiro-map-github-vercel
+        run: |
+          npm ci
+          npm test
+
+      - name: Commit the verified integration atomically
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Connect ECOSCAPE B120 runtime to LocationProfile'
+          git push origin HEAD:agent/connect-ecoscape-b120-runtime
