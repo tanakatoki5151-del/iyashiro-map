@@ -32,6 +32,7 @@ function fromSearchParams(request: NextRequest): NexusPolicyInput {
   return {
     propertyName: cleanText(params.get("name"), 120),
     address: cleanText(params.get("address"), 160),
+    town: cleanText(params.get("town"), 80),
     sourceUrl: cleanText(params.get("url"), 500),
     totalMonthlyFixedJPY: optionalNumber(params.get("total"), "total"),
     areaSquareMeters: optionalNumber(params.get("area"), "area"),
@@ -45,6 +46,7 @@ function fromBody(body: Record<string, unknown>): NexusPolicyInput {
   return {
     propertyName: cleanText(body.propertyName, 120),
     address: cleanText(body.address, 160),
+    town: cleanText(body.town, 80),
     sourceUrl: cleanText(body.sourceUrl, 500),
     totalMonthlyFixedJPY: optionalNumber(body.totalMonthlyFixedJPY, "totalMonthlyFixedJPY"),
     areaSquareMeters: optionalNumber(body.areaSquareMeters, "areaSquareMeters"),
@@ -54,34 +56,23 @@ function fromBody(body: Record<string, unknown>): NexusPolicyInput {
   };
 }
 
-function response(input: NexusPolicyInput) {
-  return NextResponse.json(assessNexusProperty(input), {
-    headers: {
-      "Cache-Control": "no-store",
-      "Access-Control-Allow-Origin": "*",
-    },
-  });
+function json(input: NexusPolicyInput) {
+  return NextResponse.json(assessNexusProperty(input), { headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
 }
 
 export async function GET(request: NextRequest) {
   try {
-    return response(fromSearchParams(request));
+    return json(fromSearchParams(request));
   } catch (error) {
-    return NextResponse.json(
-      { error: "invalid_input", message: error instanceof Error ? error.message : "入力を確認してください。" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "invalid_input", message: error instanceof Error ? error.message : "入力を確認してください。" }, { status: 400 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
-    return response(fromBody(body));
+    return json(fromBody(body));
   } catch (error) {
-    return NextResponse.json(
-      { error: "invalid_input", message: error instanceof Error ? error.message : "JSON入力を確認してください。" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "invalid_input", message: error instanceof Error ? error.message : "JSON入力を確認してください。" }, { status: 400 });
   }
 }
