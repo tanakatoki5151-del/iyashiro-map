@@ -1,0 +1,22 @@
+name: ECOSCAPE Runtime Inspect
+
+on:
+  push:
+    branches:
+      - agent/connect-ecoscape-b120-runtime-v3
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Inspect compact runtime
+        working-directory: iyashiro-map-github-vercel
+        run: node scripts/inspect-ecoscape-runtime.mjs
