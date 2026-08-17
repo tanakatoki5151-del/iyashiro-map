@@ -187,7 +187,7 @@ jobs:
         id: e2e
         continue-on-error: true
         working-directory: iyashiro-map-github-vercel
-        run: npx playwright test tests/ecoscape-preview-e2e.temp.spec.mjs --project=chromium --reporter=line
+        run: npx playwright test tests/ecoscape-preview-e2e.temp.spec.mjs --reporter=line
 
       - uses: actions/upload-artifact@v4
         if: always()
