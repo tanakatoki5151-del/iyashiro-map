@@ -1,0 +1,4 @@
+build=ecos-mw5-production-promotion-gate-20260817-b127
+sourceCommit=f27c13a2a870afd07b49f8d1a4f698e17645532a
+sourceRoot=iyashiro-map-github-vercel
+purpose=temporary authenticated direct Vercel production deployment source
