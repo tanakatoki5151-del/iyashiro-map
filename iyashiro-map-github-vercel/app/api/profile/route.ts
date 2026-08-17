@@ -6,6 +6,7 @@ import { resolveCanonicalCell } from "@/app/lib/location-profile/canonical-cell"
 import { buildPlaceGraphLayer, type PlaceGraphAdapterData } from "@/app/lib/location-profile/placegraph-adapter";
 import { placeGraphSparseCells } from "@/app/lib/location-profile/placegraph-sparse-runtime";
 import { buildV10Layer } from "@/app/lib/location-profile/v10-adapter";
+import { buildUnderlandLayer } from "@/app/lib/location-profile/underland-adapter";
 import type { LayerId, LocationLayer, LocationProfileAudience } from "@/app/lib/location-profile/types";
 
 export const dynamic = "force-dynamic";
@@ -26,9 +27,7 @@ async function resolveQuery(request: NextRequest) {
   if (Number.isFinite(lat) && Number.isFinite(lng)) {
     return { query: q || null, matchedAddress: null as string | null, lat, lng };
   }
-  if (q.length < 2 || q.length > 120) {
-    throw new TypeError("q または lat/lng を指定してください。");
-  }
+  if (q.length < 2 || q.length > 120) throw new TypeError("q または lat/lng を指定してください。");
   const endpoint = new URL("https://msearch.gsi.go.jp/address-search/AddressSearch");
   endpoint.searchParams.set("q", q);
   const response = await fetch(endpoint);
@@ -40,13 +39,7 @@ async function resolveQuery(request: NextRequest) {
       lng: Number(feature.geometry?.coordinates?.[0]),
       lat: Number(feature.geometry?.coordinates?.[1]),
     }))
-    .find(
-      (candidate) =>
-        candidate.label &&
-        Number.isFinite(candidate.lat) &&
-        Number.isFinite(candidate.lng) &&
-        isAddressLabelInScope(candidate.label),
-    );
+    .find((candidate) => candidate.label && Number.isFinite(candidate.lat) && Number.isFinite(candidate.lng) && isAddressLabelInScope(candidate.label));
   if (!match) throw new RangeError("対象範囲に一致する住所が見つかりませんでした。");
   return { query: q, matchedAddress: match.label, lat: match.lat, lng: match.lng };
 }
@@ -67,10 +60,7 @@ function readinessLayer(
     datasetVersion: null,
     findings: [],
     warnings: [note],
-    metadata: {
-      integrationState: state === "partial" ? "ADAPTER_STAGED" : "FORMAL_RELEASE_PENDING",
-      ...metadata,
-    },
+    metadata: { integrationState: state === "partial" ? "ADAPTER_STAGED" : "FORMAL_RELEASE_PENDING", ...metadata },
   };
 }
 
@@ -79,8 +69,7 @@ export async function GET(request: NextRequest) {
     const resolved = await resolveQuery(request);
     const diagnosis = await diagnoseLocation(resolved.lat, resolved.lng);
     const cell = resolveCanonicalCell(resolved.lat, resolved.lng);
-    const audience: LocationProfileAudience =
-      request.nextUrl.searchParams.get("audience") === "owner" ? "owner" : "public";
+    const audience: LocationProfileAudience = request.nextUrl.searchParams.get("audience") === "owner" ? "owner" : "public";
 
     const placeGraphData: PlaceGraphAdapterData = {
       buildId: "placegraph-operational-l4-20260817-v1",
@@ -97,13 +86,12 @@ export async function GET(request: NextRequest) {
     placeGraph.warnings = [
       ...placeGraph.warnings,
       ...(indexed && indexed.totalLinks > 0
-        ? [
-            `${indexed.totalLinks} PLACEGRAPH relation(s) are indexed for this cell. Detailed owner records remain server-side gated until the internal payload adapter is connected.`,
-          ]
+        ? [`${indexed.totalLinks} PLACEGRAPH relation(s) are indexed for this cell. Detailed owner records remain server-side gated until the internal payload adapter is connected.`]
         : []),
     ];
 
     const v10 = await buildV10Layer(cell.gridRow, cell.gridCol);
+    const underland = buildUnderlandLayer(cell.gridRow, cell.gridCol);
 
     const layers: LocationLayer[] = [
       placeGraph,
@@ -121,13 +109,7 @@ export async function GET(request: NextRequest) {
         "partial",
         "VEIL is currently partial/cohort-backed. Folklore, incident, taboo and physical facts stay separated until their canonical adapters are connected.",
       ),
-      readinessLayer(
-        "underland",
-        "UNDERLAND",
-        "partial",
-        "UNDERLAND serves an operational response for any canonical cell, but detailed full-area lane payloads are not yet bundled into this website runtime.",
-        { operationalAnyCell: true, convergenceGate: "OPEN_SCIENTIFIC_GATE", userActionRequired: false },
-      ),
+      underland,
       readinessLayer(
         "limen",
         "LIMEN",
@@ -175,8 +157,7 @@ export async function GET(request: NextRequest) {
       legacyRuntime: diagnosis as unknown as Readonly<Record<string, unknown>>,
       layers,
       coverage: {
-        cellClosureStatus:
-          indexed?.indexStatus ?? "NO_INDEXED_CANDIDATE_SOURCE_LIMITED",
+        cellClosureStatus: indexed?.indexStatus ?? "NO_INDEXED_CANDIDATE_SOURCE_LIMITED",
         sourceCoverageCeiling: "PARTIAL_KNOWN_SOURCES",
         absenceClaimAllowed: false,
         lastUpdatedAt: "2026-08-17",
@@ -185,7 +166,7 @@ export async function GET(request: NextRequest) {
           "Operational L4 uses a user-approved 100m tolerance.",
           "No known relation is not evidence that a cell is historically empty or safe.",
           "Research projects keep their own evidence status; LocationProfile does not rescore them.",
-          "V10 frozen-cell facts are now connected read-only; V11/VEIL/UNDERLAND/LIMEN detailed fact adapters continue incrementally.",
+          "V10 frozen-cell facts and UNDERLAND practical water/moisture context are connected read-only; V11/VEIL/LIMEN detailed fact adapters continue incrementally.",
         ],
       },
     });
