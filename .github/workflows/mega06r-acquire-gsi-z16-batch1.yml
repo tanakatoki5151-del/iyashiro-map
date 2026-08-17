@@ -1,0 +1,42 @@
+name: MEGA06R Acquire GSI Z16 Batch1
+
+on:
+  push:
+    branches:
+      - agent/mega06r-w05-acquisition-20260817
+    paths:
+      - .github/scripts/mega06r_acquire_gsi_queue.py
+      - .github/data/GSI_Z16_BATCH1_TOP500_TILES.json
+      - .github/workflows/mega06r-acquire-gsi-z16-batch1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquire-z16-batch1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install decoder
+        run: python -m pip install --quiet mapbox-vector-tile requests
+
+      - name: Acquire targeted z16 tiles
+        run: >-
+          python .github/scripts/mega06r_acquire_gsi_queue.py
+          --queue .github/data/GSI_Z16_BATCH1_TOP500_TILES.json
+          --out gsi-z16-batch1
+          --workers 10
+          --build-id mega06r-gsi-z16-targeted-batch1-acquisition-r1
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mega06r-gsi-z16-targeted-batch1-r1
+          path: gsi-z16-batch1/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
