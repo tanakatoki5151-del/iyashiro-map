@@ -26,9 +26,9 @@ PLATEAU = {"PASS": 1, "EXPLICIT_NO_BUILDINGS": 2, "UNKNOWN_SOURCE_TILE_404": 3}
 
 RUNTIME_TEMPLATE = '''import "server-only";
 import { gunzipSync } from "node:zlib";
-{imports}
+__IMPORTS__
 
-const ENCODED_GZIP = {joined};
+const ENCODED_GZIP = __JOINED__;
 
 export const ECOSCAPE_RUNTIME_VERSION = "ECOSCAPE_PROPERTY_PROFILE_INDEX_120662_B120";
 export const ECOSCAPE_BUILD_ID = "ecos-mw4-property-profile-adapter-20260817-b120";
@@ -290,7 +290,7 @@ def build(args: argparse.Namespace) -> None:
         (out / f"ecoscape-runtime-chunk-{index}.ts").write_text(f"export default {json.dumps(chunk)};\n", encoding="utf-8")
     imports = "\n".join(f'import c{index} from "./ecoscape-runtime-chunk-{index}";' for index in range(len(chunks)))
     joined = " + ".join(f"c{index}" for index in range(len(chunks)))
-    (out / "ecoscape-runtime.ts").write_text(RUNTIME_TEMPLATE.format(imports=imports, joined=joined), encoding="utf-8")
+    (out / "ecoscape-runtime.ts").write_text(RUNTIME_TEMPLATE.replace("__IMPORTS__", imports).replace("__JOINED__", joined), encoding="utf-8")
     (out / "ecoscape-adapter.ts").write_text(ADAPTER, encoding="utf-8")
 
     route_path = repo / "app/api/profile/route.ts"

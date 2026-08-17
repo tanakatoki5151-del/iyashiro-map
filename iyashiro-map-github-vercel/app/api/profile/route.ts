@@ -7,6 +7,7 @@ import { buildPlaceGraphLayer, type PlaceGraphAdapterData } from "@/app/lib/loca
 import { placeGraphSparseCells } from "@/app/lib/location-profile/placegraph-sparse-runtime";
 import { buildV10Layer } from "@/app/lib/location-profile/v10-adapter";
 import { buildUnderlandLayer } from "@/app/lib/location-profile/underland-adapter";
+import { buildEcoscapeLayer } from "@/app/lib/location-profile/ecoscape-adapter";
 import type { LayerId, LocationLayer, LocationProfileAudience } from "@/app/lib/location-profile/types";
 
 export const dynamic = "force-dynamic";
@@ -92,6 +93,7 @@ export async function GET(request: NextRequest) {
 
     const v10 = await buildV10Layer(cell.gridRow, cell.gridCol);
     const underland = buildUnderlandLayer(cell.gridRow, cell.gridCol);
+    const ecoscape = buildEcoscapeLayer(cell.gridRow, cell.gridCol);
 
     const layers: LocationLayer[] = [
       placeGraph,
@@ -117,12 +119,7 @@ export async function GET(request: NextRequest) {
         "LIMEN has explicit status for all 120,662 cells and 1,413 candidate/context cells, but historical-original geometry promotions remain zero. Candidate status is not a positive conclusion.",
         { formalStatusCoverageCells: 120662, candidateOrContextCells: 1413, historicalOriginalGeometryPromotions: 0 },
       ),
-      readinessLayer(
-        "ecoscape",
-        "ECOSCAPE",
-        "not_available",
-        "ECOSCAPE formal release is pending; unreleased source families remain UNKNOWN.",
-      ),
+      ecoscape,
     ];
 
     const profile = composeLocationProfile({
@@ -166,7 +163,7 @@ export async function GET(request: NextRequest) {
           "Operational L4 uses a user-approved 100m tolerance.",
           "No known relation is not evidence that a cell is historically empty or safe.",
           "Research projects keep their own evidence status; LocationProfile does not rescore them.",
-          "V10 frozen-cell facts and UNDERLAND practical water/moisture context are connected read-only; V11/VEIL/LIMEN detailed fact adapters continue incrementally.",
+          "V10, UNDERLAND and ECOSCAPE B120 facts are connected read-only; V11/VEIL/LIMEN detailed fact adapters continue incrementally.",
         ],
       },
     });
