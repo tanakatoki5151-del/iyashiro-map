@@ -138,7 +138,7 @@ jobs:
               await expect(page.getByRole('heading', { name: /土地カルテ/ })).toBeVisible();
               await expect(page.getByText('環境・植生', { exact: true })).toBeVisible();
               await expect(page.getByText(/ECOSCAPE環境・住宅候補/)).toBeVisible();
-              await expect(page.getByText(/注意条件が優勢/)).toBeVisible();
+              await expect(page.getByText('ECOSCAPE環境・住宅候補: 注意条件が優勢', { exact: true })).toBeVisible();
 
               const overflow = await page.evaluate(
                 () => document.documentElement.scrollWidth - window.innerWidth,
@@ -197,7 +197,7 @@ jobs:
         run: |
           cp /tmp/ecoscape-server.log browser-artifacts/ecoscape-server.log || true
           cp /tmp/ecoscape-health.json browser-artifacts/ecoscape-health.json || true
-          npm audit --omit=dev --json > browser-artifacts/npm-audit-production.json || true
+          npm audit --omit=dev --package-lock-only --json > browser-artifacts/npm-audit-production.json || true
 
       - uses: actions/upload-artifact@v4
         if: always()
