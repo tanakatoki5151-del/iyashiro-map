@@ -1,0 +1,36 @@
+name: MEGA06R Acquire GSI Current Water Z14 v2
+
+on:
+  push:
+    branches:
+      - agent/mega06r-w05-acquisition-20260817
+    paths:
+      - .github/scripts/mega06r_acquire_gsi_z14.py
+      - .github/workflows/mega06r-acquire-gsi-current-water-z14-v2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquire-gsi-current-water:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install decoder
+        run: python -m pip install --quiet mapbox-vector-tile requests
+
+      - name: Acquire and extract
+        run: python .github/scripts/mega06r_acquire_gsi_z14.py --out gsi-current-water-z14 --zoom 14 --workers 10
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mega06r-gsi-current-water-z14-r2
+          path: gsi-current-water-z14/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
