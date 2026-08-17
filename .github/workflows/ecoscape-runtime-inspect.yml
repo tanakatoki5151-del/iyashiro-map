@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Decode staged runtime
+      - name: Inspect staged runtime
         shell: bash
         run: |
           node <<'NODE'
@@ -40,65 +40,60 @@ jobs:
             if (!match) throw new Error(`Unable to parse ${file}`);
             const bytes = Buffer.from(match[1], 'base64');
             chunkBuffers.push(bytes);
-            chunks.push({
-              index,
-              encodedChars: match[1].length,
-              decodedBytes: bytes.length,
-              firstHex: bytes.subarray(0, 16).toString('hex'),
-              lastHex: bytes.subarray(Math.max(0, bytes.length - 16)).toString('hex'),
-            });
+            chunks.push({ index, encodedChars: match[1].length, decodedBytes: bytes.length });
           }
 
           const gzip = Buffer.concat(chunkBuffers);
-          fs.writeFileSync(path.join(output, 'ecoscape-runtime.gzip'), gzip);
-
+          fs.writeFileSync(path.join(output, 'staged-runtime.gzip'), gzip);
           let raw = null;
           let strictError = null;
-          let partialError = null;
-          try {
-            raw = zlib.gunzipSync(gzip);
-          } catch (error) {
+          try { raw = zlib.gunzipSync(gzip); }
+          catch (error) {
             strictError = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-            try {
-              raw = zlib.gunzipSync(gzip, { finishFlush: zlib.constants.Z_SYNC_FLUSH });
-            } catch (partial) {
-              partialError = partial instanceof Error ? `${partial.name}: ${partial.message}` : String(partial);
-            }
+            try { raw = zlib.gunzipSync(gzip, { finishFlush: zlib.constants.Z_SYNC_FLUSH }); } catch {}
           }
-
-          if (raw) fs.writeFileSync(path.join(output, 'ecoscape-runtime.raw'), raw);
-          const preview = raw ? raw.subarray(0, Math.min(raw.length, 4096)) : Buffer.alloc(0);
-          let parsed = null;
-          if (raw) {
-            try { parsed = JSON.parse(raw.toString('utf8')); } catch {}
-          }
-
+          if (raw) fs.writeFileSync(path.join(output, 'staged-runtime.partial.raw'), raw);
           const metadata = {
             chunks,
             gzipBytes: gzip.length,
             gzipSha256: crypto.createHash('sha256').update(gzip).digest('hex'),
-            gzipFirstHex: gzip.subarray(0, 64).toString('hex'),
-            gzipLastHex: gzip.subarray(Math.max(0, gzip.length - 64)).toString('hex'),
             strictError,
-            partialError,
             partialRecoverySucceeded: raw !== null,
-            rawBytes: raw?.length ?? null,
-            rawSha256: raw ? crypto.createHash('sha256').update(raw).digest('hex') : null,
-            firstBytesHex: preview.subarray(0, 128).toString('hex'),
-            firstText: preview.toString('utf8'),
-            lastBytesHex: raw ? raw.subarray(Math.max(0, raw.length - 128)).toString('hex') : null,
-            lastText: raw ? raw.subarray(Math.max(0, raw.length - 4096)).toString('utf8') : null,
-            jsonParsed: parsed !== null,
-            jsonTopLevelType: Array.isArray(parsed) ? 'array' : parsed && typeof parsed === 'object' ? 'object' : typeof parsed,
-            jsonKeys: parsed && !Array.isArray(parsed) && typeof parsed === 'object' ? Object.keys(parsed).slice(0, 100) : [],
-            jsonArrayLength: Array.isArray(parsed) ? parsed.length : null,
-            jsonFirstItem: Array.isArray(parsed) ? parsed[0] : null,
+            partialRawBytes: raw?.length ?? null,
+            partialRawSha256: raw ? crypto.createHash('sha256').update(raw).digest('hex') : null,
           };
-          fs.writeFileSync(path.join(output, 'metadata.json'), JSON.stringify(metadata, null, 2));
+          fs.writeFileSync(path.join(output, 'staged-runtime-metadata.json'), JSON.stringify(metadata, null, 2));
           console.log(JSON.stringify(metadata, null, 2));
           NODE
 
-      - name: Upload decoded inspection
+      - name: Probe canonical B120 Drive bundle
+        shell: bash
+        run: |
+          set +e
+          python -m pip install --disable-pip-version-check -q gdown
+          gdown --id 1qOqlGpY3iZK-kSuuqr7QaTpWJnslvNaI -O ecoscape-runtime-inspection/ECOSCAPE_MW4_PROPERTY_PROFILE_ADAPTER_B120.zip
+          code=$?
+          python <<'PY'
+          import hashlib, json, os, zipfile
+          path = 'ecoscape-runtime-inspection/ECOSCAPE_MW4_PROPERTY_PROFILE_ADAPTER_B120.zip'
+          result = {'exists': os.path.exists(path), 'size': os.path.getsize(path) if os.path.exists(path) else None}
+          if os.path.exists(path):
+              with open(path, 'rb') as f:
+                  result['sha256'] = hashlib.sha256(f.read()).hexdigest()
+              try:
+                  with zipfile.ZipFile(path) as z:
+                      result['zipOk'] = z.testzip() is None
+                      result['members'] = z.namelist()
+              except Exception as exc:
+                  result['zipOk'] = False
+                  result['error'] = repr(exc)
+          with open('ecoscape-runtime-inspection/drive-download-probe.json', 'w') as f:
+              json.dump(result, f, ensure_ascii=False, indent=2)
+          print(json.dumps(result, ensure_ascii=False, indent=2))
+          PY
+          exit 0
+
+      - name: Upload inspection
         uses: actions/upload-artifact@v4
         with:
           name: ecoscape-runtime-inspection
