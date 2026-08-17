@@ -1,0 +1,103 @@
+name: RYUMYAK W05 source acquisition
+
+on:
+  push:
+    branches:
+      - research/ryumyak-mega06r-r2-fetch
+    paths:
+      - .github/workflows/ryumyak-w05-fetch.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-w05:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch official MLIT W05 archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/unpacked
+
+          fetch_one() {
+            pref="$1"
+            filename="W05-08_${pref}_GML.zip"
+            primary="https://nlftp.mlit.go.jp/ksj/gml/data/W05/W05-08/${filename}"
+            fallback="https://nlftp.mlit.go.jp/ksj/gml/data/W05/W05-08/W05-08_${pref}.zip"
+            echo "Fetching ${filename}"
+            if ! curl --fail --location --retry 4 --retry-all-errors --connect-timeout 30 --max-time 300 \
+              --user-agent 'RYUMYAK-MEGA06R-R2/1.0' \
+              "$primary" -o "artifacts/${filename}"; then
+              echo "Primary URL failed; trying fallback"
+              curl --fail --location --retry 4 --retry-all-errors --connect-timeout 30 --max-time 300 \
+                --user-agent 'RYUMYAK-MEGA06R-R2/1.0' \
+                "$fallback" -o "artifacts/${filename}"
+            fi
+            python - <<PY
+from pathlib import Path
+p = Path('artifacts/${filename}')
+b = p.read_bytes()
+assert b[:2] == b'PK', f'not zip: {p} first={b[:16].hex()}'
+assert len(b) > 100_000, f'archive unexpectedly small: {len(b)}'
+print(p, len(b), b[:16].hex())
+PY
+            unzip -t "artifacts/${filename}"
+            mkdir -p "artifacts/unpacked/${pref}"
+            unzip -q "artifacts/${filename}" -d "artifacts/unpacked/${pref}"
+          }
+
+          fetch_one 13
+          fetch_one 14
+
+      - name: Build immutable acquisition manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+import hashlib
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+root = Path('artifacts')
+files = []
+for p in sorted(root.rglob('*')):
+    if not p.is_file() or p.name == 'manifest.json':
+        continue
+    data = p.read_bytes()
+    files.append({
+        'path': str(p.relative_to(root)),
+        'bytes': len(data),
+        'sha256': hashlib.sha256(data).hexdigest(),
+        'firstHex': data[:16].hex(),
+    })
+manifest = {
+    'buildId': 'ryumyak-mega06r-r2-w05-acquisition-v1',
+    'generatedAtUTC': datetime.now(timezone.utc).isoformat(),
+    'source': 'MLIT National Land Numerical Information W05',
+    'sourceVintage': 'FY2008 Tokyo and Kanagawa',
+    'sourceUrls': [
+        'https://nlftp.mlit.go.jp/ksj/gml/data/W05/W05-08/W05-08_13_GML.zip',
+        'https://nlftp.mlit.go.jp/ksj/gml/data/W05/W05-08/W05-08_14_GML.zip',
+    ],
+    'interpretationBoundary': 'Official 2008 hydrography backbone; not a claim of complete 2026 current geometry.',
+    'files': files,
+}
+(root / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
+print(json.dumps(manifest, ensure_ascii=False, indent=2))
+PY
+
+      - name: Upload verified source bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ryumyak-w05-tokyo-kanagawa-source
+          path: artifacts/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
