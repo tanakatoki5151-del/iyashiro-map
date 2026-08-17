@@ -1,0 +1,126 @@
+name: MEGA06R Acquire W05 Tokyo Kanagawa
+
+on:
+  push:
+    branches:
+      - agent/mega06r-w05-acquisition-20260817
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquire-w05:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download and validate W05 Tokyo and Kanagawa
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ROOT="$GITHUB_WORKSPACE/w05-artifact"
+          RAW="$ROOT/raw"
+          EXTRACTED="$ROOT/extracted"
+          mkdir -p "$RAW" "$EXTRACTED/tokyo" "$EXTRACTED/kanagawa"
+
+          download_one() {
+            local pref="$1"
+            local outfile="$2"
+            local direct_https="https://nlftp.mlit.go.jp/ksj/gml/data/W05/W05-08/W05-08_${pref}_GML.zip"
+            local direct_http="http://nlftp.mlit.go.jp/ksj/gml/data/W05/W05-08/W05-08_${pref}_GML.zip"
+            echo "Trying $direct_https" | tee -a "$ROOT/DOWNLOAD_LOG.txt"
+            if curl --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 30 --max-time 300 -fL "$direct_https" -o "$outfile"; then
+              return 0
+            fi
+            echo "HTTPS direct route failed; trying HTTP route" | tee -a "$ROOT/DOWNLOAD_LOG.txt"
+            if curl --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 30 --max-time 300 -fL "$direct_http" -o "$outfile"; then
+              return 0
+            fi
+
+            echo "Direct routes failed; querying legacy official URL API" | tee -a "$ROOT/DOWNLOAD_LOG.txt"
+            local api_xml="$ROOT/api_${pref}.xml"
+            curl --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 30 --max-time 120 -fLG \
+              "http://nlftp.mlit.go.jp/ksj/api/1.0b/index.php/app/getKSJURL.xml" \
+              --data-urlencode "appId=ksjapibeta1" \
+              --data-urlencode "lang=J" \
+              --data-urlencode "dataformat=1" \
+              --data-urlencode "identifier=W05" \
+              --data-urlencode "prefCode=${pref}" \
+              --data-urlencode "fiscalyear=2008" \
+              -o "$api_xml"
+            local resolved
+            resolved=$(python - "$api_xml" <<'PY'
+import re
+import sys
+from pathlib import Path
+text = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+urls = re.findall(r"https?://[^<\s\"]+\.zip", text)
+if not urls:
+    raise SystemExit("No ZIP URL returned by official API")
+print(urls[0].replace("&amp;", "&"))
+PY
+)
+            echo "Resolved API URL: $resolved" | tee -a "$ROOT/DOWNLOAD_LOG.txt"
+            curl --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 30 --max-time 300 -fL "$resolved" -o "$outfile"
+          }
+
+          download_one 13 "$RAW/W05-08_13_GML.zip"
+          download_one 14 "$RAW/W05-08_14_GML.zip"
+
+          file "$RAW"/*.zip | tee "$ROOT/FILE_TYPES.txt"
+          unzip -t "$RAW/W05-08_13_GML.zip" | tee "$ROOT/ZIPTEST_TOKYO.txt"
+          unzip -t "$RAW/W05-08_14_GML.zip" | tee "$ROOT/ZIPTEST_KANAGAWA.txt"
+          unzip -q "$RAW/W05-08_13_GML.zip" -d "$EXTRACTED/tokyo"
+          unzip -q "$RAW/W05-08_14_GML.zip" -d "$EXTRACTED/kanagawa"
+
+          find "$ROOT" -type f -printf '%P\t%s bytes\n' | sort | tee "$ROOT/FILE_INVENTORY.tsv"
+          sha256sum "$RAW"/*.zip | tee "$ROOT/SHA256SUMS.txt"
+
+          python - "$ROOT" <<'PY'
+import hashlib
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+root = Path(sys.argv[1])
+files = []
+for path in sorted(p for p in root.rglob("*") if p.is_file()):
+    data = path.read_bytes()
+    files.append({
+        "path": str(path.relative_to(root)),
+        "sizeBytes": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    })
+manifest = {
+    "buildId": "mega06r-w05-tokyo-kanagawa-acquisition-r1",
+    "generatedAtUtc": datetime.now(timezone.utc).isoformat(),
+    "sources": [
+        {
+            "dataset": "MLIT National Land Numerical Information W05 River",
+            "prefectureCode": "13",
+            "fiscalYear": "2008",
+            "expectedArchive": "W05-08_13_GML.zip",
+        },
+        {
+            "dataset": "MLIT National Land Numerical Information W05 River",
+            "prefectureCode": "14",
+            "fiscalYear": "2008",
+            "expectedArchive": "W05-08_14_GML.zip",
+        },
+    ],
+    "files": files,
+}
+(root / "MANIFEST.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+PY
+
+      - name: Upload W05 source artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mega06r-w05-tokyo-kanagawa-r1
+          path: w05-artifact/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
