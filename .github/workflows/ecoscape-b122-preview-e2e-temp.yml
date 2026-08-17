@@ -10,13 +10,13 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   preview-e2e:
     runs-on: ubuntu-latest
     env:
       PREVIEW_BASE: https://iyashiro-1ordofdeg-tanakatoki5151-dels-projects.vercel.app
-      VERCEL_SHARE: BW5fU69SS6l65rYpEEMpUxDcRgtHBqHE
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,6 +24,15 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: iyashiro-map-github-vercel/package-lock.json
+
+      - name: Acquire trusted GitHub OIDC token
+        id: oidc
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken();
+            core.setSecret(token);
+            core.setOutput('token', token);
 
       - name: Install browser test runtime and capture production dependency audit
         working-directory: iyashiro-map-github-vercel
@@ -41,7 +50,7 @@ jobs:
           npm install --no-save --package-lock=false @playwright/test@1.58.2
           npx playwright install --with-deps chromium
 
-      - name: Write protected-preview E2E
+      - name: Write trusted-preview E2E
         working-directory: iyashiro-map-github-vercel
         shell: bash
         run: |
@@ -50,14 +59,22 @@ jobs:
           import { mkdir, writeFile } from 'node:fs/promises';
 
           const base = process.env.PREVIEW_BASE;
-          const share = process.env.VERCEL_SHARE;
+          const oidc = process.env.VERCEL_TRUSTED_OIDC_TOKEN;
           const address = '東京都豊島区目白五丁目8-1';
 
-          test.use({ ...devices['iPhone 13'], browserName: 'chromium' });
+          if (!oidc) throw new Error('VERCEL_TRUSTED_OIDC_TOKEN is required');
 
-          test('ECOSCAPE B122 protected preview API, UI and mobile readback', async ({ page, context }) => {
+          test.use({
+            ...devices['iPhone 13'],
+            browserName: 'chromium',
+            extraHTTPHeaders: {
+              'x-vercel-trusted-oidc-idp-token': oidc,
+            },
+          });
+
+          test('ECOSCAPE B122 protected preview API, UI and mobile readback', async ({ page }) => {
             const consoleErrors = [];
-            const diagnostics = { deployment: base, landing: {}, requests: [], cookies: [], consoleErrors };
+            const diagnostics = { deployment: base, landing: {}, requests: [], consoleErrors };
             page.on('console', (message) => {
               if (message.type() === 'error') consoleErrors.push(message.text());
             });
@@ -92,20 +109,13 @@ jobs:
             }
 
             try {
-              const landingResponse = await page.goto(`${base}/?_vercel_share=${share}`, {
-                waitUntil: 'networkidle',
-              });
+              const landingResponse = await page.goto(base, { waitUntil: 'networkidle' });
               diagnostics.landing = {
                 status: landingResponse?.status() ?? null,
                 url: page.url(),
                 title: await page.title(),
                 bodyPrefix: (await page.locator('body').innerText()).slice(0, 500),
               };
-              diagnostics.cookies = (await context.cookies(base)).map((cookie) => ({
-                name: cookie.name,
-                domain: cookie.domain,
-                path: cookie.path,
-              }));
               expect(new URL(page.url()).hostname).toBe(new URL(base).hostname);
 
               const coordinate = await browserFetchJson('/api/profile?lat=35.723007&lng=139.694672');
@@ -183,10 +193,12 @@ jobs:
           });
           TEST
 
-      - name: Run protected preview E2E
+      - name: Run trusted preview E2E
         id: e2e
         continue-on-error: true
         working-directory: iyashiro-map-github-vercel
+        env:
+          VERCEL_TRUSTED_OIDC_TOKEN: ${{ steps.oidc.outputs.token }}
         run: npx playwright test tests/ecoscape-preview-e2e.temp.spec.mjs --reporter=line
 
       - uses: actions/upload-artifact@v4
