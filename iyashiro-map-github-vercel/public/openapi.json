@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "イヤシロ土地判定 API",
-    "version": "2.1.0",
-    "description": "東京23区・横浜市・川崎市のイヤシロ仮説と現代的土地条件を取得する読み取り専用APIです。クオレガ東京本社4.5km圏と田園都市線の渋谷〜二子玉川・線路中心1km帯は100m間隔で事前計算されています。"
+    "title": "イヤシロ土地判定・NEXUS API",
+    "version": "2.2.0",
+    "description": "東京23区・横浜市・川崎市の土地カルテと、家賃条件を透明なゲートで確認するNEXUS物件判定を提供する読み取り専用APIです。"
   },
   "paths": {
     "/api/lookup": {
@@ -11,20 +11,10 @@
         "operationId": "diagnoseAddress",
         "summary": "住所から土地を診断する",
         "parameters": [
-          {
-            "name": "q",
-            "in": "query",
-            "required": true,
-            "schema": { "type": "string" }
-          }
+          { "name": "q", "in": "query", "required": true, "schema": { "type": "string" } }
         ],
         "responses": {
-          "200": {
-            "description": "住所と診断結果",
-            "content": {
-              "application/json": { "schema": { "type": "object" } }
-            }
-          }
+          "200": { "description": "住所と診断結果", "content": { "application/json": { "schema": { "type": "object" } } } }
         }
       }
     },
@@ -33,26 +23,52 @@
         "operationId": "diagnoseCoordinates",
         "summary": "緯度経度から土地を診断する",
         "parameters": [
-          {
-            "name": "lat",
-            "in": "query",
-            "required": true,
-            "schema": { "type": "number" }
-          },
-          {
-            "name": "lng",
-            "in": "query",
-            "required": true,
-            "schema": { "type": "number" }
-          }
+          { "name": "lat", "in": "query", "required": true, "schema": { "type": "number" } },
+          { "name": "lng", "in": "query", "required": true, "schema": { "type": "number" } }
         ],
         "responses": {
-          "200": {
-            "description": "診断結果",
-            "content": {
-              "application/json": { "schema": { "type": "object" } }
-            }
-          }
+          "200": { "description": "診断結果", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/api/profile": {
+      "get": {
+        "operationId": "getLocationProfile",
+        "summary": "住所または座標から土地カルテを取得する",
+        "parameters": [
+          { "name": "q", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "lat", "in": "query", "required": false, "schema": { "type": "number" } },
+          { "name": "lng", "in": "query", "required": false, "schema": { "type": "number" } }
+        ],
+        "responses": {
+          "200": { "description": "研究レイヤーを分離した土地カルテ", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/api/nexus": {
+      "get": {
+        "operationId": "assessPropertyPolicy",
+        "summary": "物件をNEXUSの個人条件で判定する",
+        "parameters": [
+          { "name": "total", "in": "query", "required": false, "description": "家賃と管理費などの月額固定費合計", "schema": { "type": "number" } },
+          { "name": "area", "in": "query", "required": false, "description": "専有面積（㎡）", "schema": { "type": "number" } },
+          { "name": "floor", "in": "query", "required": false, "schema": { "type": "number" } },
+          { "name": "address", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "currentness", "in": "query", "required": false, "schema": { "type": "string", "enum": ["confirmed", "stale", "unknown"] } },
+          { "name": "identity", "in": "query", "required": false, "schema": { "type": "string", "enum": ["exact", "partial", "unknown"] } }
+        ],
+        "responses": {
+          "200": { "description": "条件ごとの通過・条件外・未判定と次の確認事項", "content": { "application/json": { "schema": { "type": "object" } } } },
+          "400": { "description": "入力形式が不正" }
+        }
+      },
+      "post": {
+        "operationId": "assessPropertyPolicyJson",
+        "summary": "JSONで物件をNEXUSの個人条件に照らす",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": {
+          "200": { "description": "条件ごとの判定結果", "content": { "application/json": { "schema": { "type": "object" } } } },
+          "400": { "description": "入力形式が不正" }
         }
       }
     }
