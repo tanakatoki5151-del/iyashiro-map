@@ -5,7 +5,7 @@ on:
   push:
     branches: [research/ecoscape-moe-qa300-b13]
     paths:
-      - research/ecoscape/four_pillar/build_four_pillar_levelb.py.gz.b64
+      - research/ecoscape/four_pillar/build_four_pillar_levelb.py.gz.b64*
       - .github/workflows/ecoscape-practical-v2-four-pillar-pilot.yml
 
 permissions:
@@ -29,7 +29,7 @@ jobs:
       - name: Decode deterministic builder
         run: |
           mkdir -p work input output/run1 output/run2
-          base64 --decode research/ecoscape/four_pillar/build_four_pillar_levelb.py.gz.b64 | gzip -dc > work/build_four_pillar_levelb.py
+          cat research/ecoscape/four_pillar/build_four_pillar_levelb.py.gz.b64* | tr -d '\n' | base64 --decode | gzip -dc > work/build_four_pillar_levelb.py
           echo '469fb62335ff3db341d37ae3a4fd945f68dfd89a364aed6353493050460fa35b  work/build_four_pillar_levelb.py' | sha256sum --check
       - name: Download Drive-fixed source inputs
         run: |
