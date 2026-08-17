@@ -1,0 +1,17 @@
+{
+  "rows": 120662,
+  "robustEnvironmental": 21549,
+  "thresholdStable": 89365,
+  "robustResidential": 12616,
+  "plateauUnknown": 114,
+  "coreZones": 779,
+  "rawBytes": 1898358,
+  "gzipBase64Chars": 424824,
+  "chunkCount": 5,
+  "fixture": {
+    "aggregate": "CAUTION",
+    "known": 4,
+    "favorable": 1,
+    "caution": 2
+  }
+}

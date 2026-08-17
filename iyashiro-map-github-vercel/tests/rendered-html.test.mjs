@@ -149,3 +149,29 @@ test("exposes a machine-readable health endpoint", async () => {
   assert.equal(payload.status, "ok");
   assert.deepEqual(payload.scope, ["東京23区", "横浜市", "川崎市"]);
 });
+
+test("connects ECOSCAPE B120 to the LocationProfile without rescoring", async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("ecoscape", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const response = await worker.fetch(
+    new Request("http://localhost/api/profile?lat=35.723007&lng=139.694672", { headers: { accept: "application/json" } }),
+    { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+  const payload = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(payload.spatialContext.cellId, "g130-240");
+  assert.equal(payload.layers.ecoscape.availability, "available");
+  assert.equal(payload.layers.ecoscape.scoringEffect, "none");
+  assert.equal(payload.layers.ecoscape.datasetVersion, "ECOSCAPE_PROPERTY_PROFILE_INDEX_120662_B120");
+  const finding = payload.layers.ecoscape.findings[0];
+  assert.equal(finding.metadata.aggregateStateP25, "CAUTION");
+  assert.equal(finding.metadata.knownPillarsP25, 4);
+  assert.equal(finding.metadata.favorablePillarsP25, 1);
+  assert.equal(finding.metadata.cautionPillarsP25, 2);
+  assert.equal(finding.metadata.candidateOverride, false);
+  assert.equal(payload.legacyRuntime.theory.score, 50);
+  assert.equal(payload.legacyRuntime.modern.score, 75);
+  assert.equal(payload.legacyRuntime.combined.score, 75);
+});
