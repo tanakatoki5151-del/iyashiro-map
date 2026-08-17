@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PREVIEW_BASE: https://iyashiro-1ordofdeg-tanakatoki5151-dels-projects.vercel.app
-      VERCEL_SHARE: JSHxAYcGKvNctWkZQ7FK1jhYjAfy8YJX
+      VERCEL_SHARE: BW5fU69SS6l65rYpEEMpUxDcRgtHBqHE
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
