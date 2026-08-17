@@ -1,0 +1,79 @@
+name: ECOSCAPE Runtime Inspect
+
+on:
+  push:
+    branches:
+      - agent/connect-ecoscape-b120-runtime
+    paths:
+      - 'iyashiro-map-github-vercel/app/lib/location-profile/ecoscape-runtime-chunk-*.ts'
+      - '.github/workflows/ecoscape-runtime-inspect.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decode staged runtime
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const zlib = require('node:zlib');
+          const crypto = require('node:crypto');
+
+          const base = path.join(process.cwd(), 'iyashiro-map-github-vercel', 'app', 'lib', 'location-profile');
+          let encoded = '';
+          const chunks = [];
+          for (let index = 0; index < 4; index += 1) {
+            const file = path.join(base, `ecoscape-runtime-chunk-${index}.ts`);
+            const source = fs.readFileSync(file, 'utf8');
+            const match = source.match(/export default\s+"([A-Za-z0-9+/=]+)";/s);
+            if (!match) throw new Error(`Unable to parse ${file}`);
+            encoded += match[1];
+            chunks.push({ index, encodedChars: match[1].length });
+          }
+
+          const gzip = Buffer.from(encoded, 'base64');
+          const raw = zlib.gunzipSync(gzip);
+          const output = path.join(process.cwd(), 'ecoscape-runtime-inspection');
+          fs.mkdirSync(output, { recursive: true });
+          fs.writeFileSync(path.join(output, 'ecoscape-runtime.raw'), raw);
+
+          const preview = raw.subarray(0, Math.min(raw.length, 4096));
+          let parsed = null;
+          try {
+            parsed = JSON.parse(raw.toString('utf8'));
+          } catch {}
+
+          const metadata = {
+            chunks,
+            encodedChars: encoded.length,
+            gzipBytes: gzip.length,
+            gzipSha256: crypto.createHash('sha256').update(gzip).digest('hex'),
+            rawBytes: raw.length,
+            rawSha256: crypto.createHash('sha256').update(raw).digest('hex'),
+            firstBytesHex: preview.subarray(0, 128).toString('hex'),
+            firstText: preview.toString('utf8'),
+            jsonParsed: parsed !== null,
+            jsonTopLevelType: Array.isArray(parsed) ? 'array' : parsed && typeof parsed === 'object' ? 'object' : typeof parsed,
+            jsonKeys: parsed && !Array.isArray(parsed) && typeof parsed === 'object' ? Object.keys(parsed).slice(0, 100) : [],
+            jsonArrayLength: Array.isArray(parsed) ? parsed.length : null,
+            jsonFirstItem: Array.isArray(parsed) ? parsed[0] : null,
+          };
+          fs.writeFileSync(path.join(output, 'metadata.json'), JSON.stringify(metadata, null, 2));
+          console.log(JSON.stringify(metadata, null, 2));
+          NODE
+
+      - name: Upload decoded inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecoscape-runtime-inspection
+          path: ecoscape-runtime-inspection
+          if-no-files-found: error
+          retention-days: 7
