@@ -1,0 +1,214 @@
+name: ECOSCAPE B122 Local Production Browser E2E Temporary
+
+on:
+  push:
+    branches:
+      - agent/connect-ecoscape-b120-runtime-v3
+    paths:
+      - .github/workflows/ecoscape-b122-local-browser-e2e-temp.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-production-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: iyashiro-map-github-vercel/package-lock.json
+
+      - name: Install, build and start production server
+        working-directory: iyashiro-map-github-vercel
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x scripts/*.sh
+          mkdir -p .openai .wrangler browser-artifacts
+          printf '%s\n' '{"d1":null,"r2":null}' > .openai/hosting.json
+          npm ci
+          npm run build
+          nohup npm run start -- --port 3000 > /tmp/ecoscape-server.log 2>&1 &
+          echo $! > /tmp/ecoscape-server.pid
+          for attempt in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:3000/api/health >/tmp/ecoscape-health.json; then
+              cat /tmp/ecoscape-health.json
+              exit 0
+            fi
+            if ! kill -0 "$(cat /tmp/ecoscape-server.pid)" 2>/dev/null; then
+              echo 'Production server exited before becoming healthy.'
+              cat /tmp/ecoscape-server.log
+              exit 1
+            fi
+            sleep 1
+          done
+          echo 'Production server did not become healthy in time.'
+          cat /tmp/ecoscape-server.log
+          exit 1
+
+      - name: Install Chromium test runtime
+        working-directory: iyashiro-map-github-vercel
+        run: |
+          npm install --no-save --package-lock=false @playwright/test@1.58.2
+          npx playwright install --with-deps chromium
+
+      - name: Write ECOSCAPE browser E2E
+        working-directory: iyashiro-map-github-vercel
+        shell: bash
+        run: |
+          cat > tests/ecoscape-local-browser-e2e.temp.spec.mjs <<'TEST'
+          import { test, expect, devices } from '@playwright/test';
+          import { mkdir, writeFile } from 'node:fs/promises';
+
+          const base = 'http://127.0.0.1:3000';
+          const address = '東京都豊島区目白五丁目8-1';
+
+          test.use({ ...devices['iPhone 13'], browserName: 'chromium' });
+
+          test('ECOSCAPE B122 production build API, UI and mobile readback', async ({ page }) => {
+            const consoleErrors = [];
+            const diagnostics = { base, requests: [], consoleErrors };
+            page.on('console', (message) => {
+              if (message.type() === 'error') consoleErrors.push(message.text());
+            });
+            page.on('pageerror', (error) => consoleErrors.push(`pageerror:${error.message}`));
+            await mkdir('browser-artifacts', { recursive: true });
+
+            async function browserFetchJson(path) {
+              const result = await page.evaluate(async (targetPath) => {
+                const response = await fetch(targetPath, {
+                  credentials: 'include',
+                  cache: 'no-store',
+                  redirect: 'follow',
+                });
+                return {
+                  status: response.status,
+                  finalUrl: response.url,
+                  contentType: response.headers.get('content-type') ?? '',
+                  text: await response.text(),
+                };
+              }, path);
+              diagnostics.requests.push({
+                path,
+                status: result.status,
+                finalUrl: result.finalUrl,
+                contentType: result.contentType,
+                bodyPrefix: result.text.slice(0, 300),
+              });
+              expect(result.status).toBe(200);
+              expect(result.contentType).toContain('application/json');
+              return JSON.parse(result.text);
+            }
+
+            try {
+              const landing = await page.goto(base, { waitUntil: 'networkidle' });
+              expect(landing?.status()).toBe(200);
+              expect(new URL(page.url()).hostname).toBe('127.0.0.1');
+
+              const coordinate = await browserFetchJson('/api/profile?lat=35.723007&lng=139.694672');
+              const ecoscape = coordinate.layers.ecoscape;
+              expect(coordinate.spatialContext.cellId).toBe('g130-240');
+              expect(ecoscape.availability).toBe('available');
+              expect(ecoscape.datasetVersion).toBe('ECOSCAPE_PROPERTY_PROFILE_INDEX_120662_B120');
+              expect(ecoscape.scoringEffect).toBe('none');
+              expect(ecoscape.metadata.candidateOverride).toBe(false);
+              expect(ecoscape.findings[0].metadata.aggregateStateP25).toBe('CAUTION');
+              expect(ecoscape.findings[0].metadata.knownPillarsP25).toBe(4);
+              expect(ecoscape.findings[0].metadata.favorablePillarsP25).toBe(1);
+              expect(ecoscape.findings[0].metadata.cautionPillarsP25).toBe(2);
+              expect(coordinate.legacyRuntime.theory.score).toBe(50);
+              expect(coordinate.legacyRuntime.modern.score).toBe(75);
+              expect(coordinate.legacyRuntime.combined.score).toBe(75);
+
+              const addressProfile = await browserFetchJson(`/api/profile?q=${encodeURIComponent(address)}`);
+              expect(addressProfile.spatialContext.cellId).toBe('g130-240');
+              expect(addressProfile.layers.ecoscape.availability).toBe('available');
+
+              const unknown = await browserFetchJson('/api/profile?lat=35.74891843334531&lng=139.7270419646649');
+              expect(unknown.spatialContext.cellId).toBe('g101-269');
+              expect(unknown.layers.ecoscape.availability).toBe('partial');
+              expect(unknown.layers.ecoscape.findings[0].metadata.plateauStatus).toBe('UNKNOWN_SOURCE_TILE_404');
+              expect(unknown.layers.ecoscape.warnings.join(' ')).toContain('UNKNOWN');
+
+              await page.goto(`${base}/profile?q=${encodeURIComponent(address)}`, { waitUntil: 'networkidle' });
+              await expect(page.getByRole('heading', { name: /土地カルテ/ })).toBeVisible();
+              await expect(page.getByText('環境・植生', { exact: true })).toBeVisible();
+              await expect(page.getByText(/ECOSCAPE環境・住宅候補/)).toBeVisible();
+              await expect(page.getByText(/注意条件が優勢/)).toBeVisible();
+
+              const overflow = await page.evaluate(
+                () => document.documentElement.scrollWidth - window.innerWidth,
+              );
+              expect(overflow).toBeLessThanOrEqual(1);
+              expect(consoleErrors).toEqual([]);
+
+              diagnostics.result = {
+                coordinate: {
+                  cellId: coordinate.spatialContext.cellId,
+                  availability: ecoscape.availability,
+                  datasetVersion: ecoscape.datasetVersion,
+                  aggregateStateP25: ecoscape.findings[0].metadata.aggregateStateP25,
+                  knownPillarsP25: ecoscape.findings[0].metadata.knownPillarsP25,
+                  favorablePillarsP25: ecoscape.findings[0].metadata.favorablePillarsP25,
+                  cautionPillarsP25: ecoscape.findings[0].metadata.cautionPillarsP25,
+                  scoringEffect: ecoscape.scoringEffect,
+                  candidateOverride: ecoscape.metadata.candidateOverride,
+                  legacyScores: [
+                    coordinate.legacyRuntime.theory.score,
+                    coordinate.legacyRuntime.modern.score,
+                    coordinate.legacyRuntime.combined.score,
+                  ],
+                },
+                address: { query: address, cellId: addressProfile.spatialContext.cellId },
+                explicitUnknown: {
+                  cellId: unknown.spatialContext.cellId,
+                  availability: unknown.layers.ecoscape.availability,
+                  plateauStatus: unknown.layers.ecoscape.findings[0].metadata.plateauStatus,
+                },
+                mobileOverflowPx: overflow,
+              };
+            } finally {
+              await page.screenshot({
+                path: 'browser-artifacts/ecoscape-b122-mobile.png',
+                fullPage: true,
+              }).catch(() => {});
+              await writeFile(
+                'browser-artifacts/ecoscape-b122-browser-readback.json',
+                JSON.stringify(diagnostics, null, 2) + '\n',
+              );
+            }
+          });
+          TEST
+
+      - name: Run production browser E2E
+        id: browser-e2e
+        continue-on-error: true
+        working-directory: iyashiro-map-github-vercel
+        run: npx playwright test tests/ecoscape-local-browser-e2e.temp.spec.mjs --reporter=line
+
+      - name: Capture server evidence
+        if: always()
+        working-directory: iyashiro-map-github-vercel
+        shell: bash
+        run: |
+          cp /tmp/ecoscape-server.log browser-artifacts/ecoscape-server.log || true
+          cp /tmp/ecoscape-health.json browser-artifacts/ecoscape-health.json || true
+          npm audit --omit=dev --json > browser-artifacts/npm-audit-production.json || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ecoscape-b122-local-production-browser-readback
+          path: iyashiro-map-github-vercel/browser-artifacts
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Enforce browser E2E result
+        if: always()
+        shell: bash
+        run: |
+          test '${{ steps.browser-e2e.outcome }}' = 'success'
