@@ -9,19 +9,18 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-BUILD_ID = "ryumyak-mega06r-r2-w05-acquisition-v1"
+BUILD_ID = "ryumyak-mega06r-r2-w05-acquisition-v2"
 ROOT = Path("artifacts")
 UNPACKED = ROOT / "unpacked"
 
+# 13/14 are the target prefectures. 11/12 are read-only boundary context so
+# rivers touching Tokyo are not truncated at the Saitama/Chiba borders.
 SOURCES = {
-    "13": [
-        "https://nlftp.mlit.go.jp/ksj/gml/data/W05/W05-08/W05-08_13_GML.zip",
-        "https://nlftp.mlit.go.jp/ksj/gml/data/W05/W05-08/W05-08_13.zip",
-    ],
-    "14": [
-        "https://nlftp.mlit.go.jp/ksj/gml/data/W05/W05-08/W05-08_14_GML.zip",
-        "https://nlftp.mlit.go.jp/ksj/gml/data/W05/W05-08/W05-08_14.zip",
-    ],
+    pref: [
+        f"https://nlftp.mlit.go.jp/ksj/gml/data/W05/W05-08/W05-08_{pref}_GML.zip",
+        f"https://nlftp.mlit.go.jp/ksj/gml/data/W05/W05-08/W05-08_{pref}.zip",
+    ]
+    for pref in ("11", "12", "13", "14")
 }
 
 
@@ -73,7 +72,7 @@ def main() -> None:
     UNPACKED.mkdir(parents=True, exist_ok=True)
 
     selected_urls: dict[str, str] = {}
-    for pref in ("13", "14"):
+    for pref in SOURCES:
         target, selected_url = fetch_pref(pref)
         selected_urls[pref] = selected_url
         print(f"verified {target} bytes={target.stat().st_size} sha256={sha256(target)}", flush=True)
@@ -95,10 +94,13 @@ def main() -> None:
         "buildId": BUILD_ID,
         "generatedAtUTC": datetime.now(timezone.utc).isoformat(),
         "source": "MLIT National Land Numerical Information W05",
-        "sourceVintage": "FY2008 Tokyo and Kanagawa",
+        "sourceVintage": "FY2008 Kanto hydrography",
+        "targetPrefectures": ["13", "14"],
+        "boundaryContextPrefectures": ["11", "12"],
         "selectedUrls": selected_urls,
         "interpretationBoundary": (
-            "Official FY2008 hydrography backbone; not a claim of complete 2026 current geometry."
+            "Official FY2008 hydrography backbone; not a claim of complete 2026 current geometry. "
+            "Saitama and Chiba are topology context only and never become target-area cells."
         ),
         "files": files,
     }
