@@ -74,6 +74,8 @@ jobs:
         working-directory: iyashiro-map-github-vercel
         run: |
           chmod +x scripts/*.sh
+          mkdir -p .openai
+          printf '%s\n' '{"d1":null,"r2":null}' > .openai/hosting.json
           npm ci
           npm test
 
