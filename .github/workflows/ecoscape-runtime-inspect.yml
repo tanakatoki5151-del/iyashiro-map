@@ -17,6 +17,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Inspect compact runtime
+      - name: Inspect existing compact runtime
         working-directory: iyashiro-map-github-vercel
         run: node scripts/inspect-ecoscape-runtime.mjs
+      - name: Probe Drive B120 public download route
+        shell: bash
+        run: |
+          set +e
+          url='https://drive.usercontent.google.com/download?id=1qOqlGpY3iZK-kSuuqr7QaTpWJnslvNaI&export=download&confirm=t'
+          code=$(curl -L --silent --show-error --max-time 120 --output /tmp/b120.zip --write-out '%{http_code}' "$url")
+          curl_status=$?
+          size=$(wc -c < /tmp/b120.zip 2>/dev/null || echo 0)
+          mime=$(file -b --mime-type /tmp/b120.zip 2>/dev/null || echo missing)
+          sha=$(sha256sum /tmp/b120.zip 2>/dev/null | awk '{print $1}')
+          unzip -t /tmp/b120.zip >/tmp/unzip.txt 2>&1
+          unzip_status=$?
+          printf 'curl_status=%s\nhttp_code=%s\nsize=%s\nmime=%s\nsha256=%s\nunzip_status=%s\n' "$curl_status" "$code" "$size" "$mime" "$sha" "$unzip_status"
+          cat /tmp/unzip.txt
+          exit 0
