@@ -28,6 +28,9 @@ jobs:
           const crypto = require('node:crypto');
 
           const base = path.join(process.cwd(), 'iyashiro-map-github-vercel', 'app', 'lib', 'location-profile');
+          const output = path.join(process.cwd(), 'ecoscape-runtime-inspection');
+          fs.mkdirSync(output, { recursive: true });
+
           const chunkBuffers = [];
           const chunks = [];
           for (let index = 0; index < 4; index += 1) {
@@ -37,29 +40,54 @@ jobs:
             if (!match) throw new Error(`Unable to parse ${file}`);
             const bytes = Buffer.from(match[1], 'base64');
             chunkBuffers.push(bytes);
-            chunks.push({ index, encodedChars: match[1].length, decodedBytes: bytes.length });
+            chunks.push({
+              index,
+              encodedChars: match[1].length,
+              decodedBytes: bytes.length,
+              firstHex: bytes.subarray(0, 16).toString('hex'),
+              lastHex: bytes.subarray(Math.max(0, bytes.length - 16)).toString('hex'),
+            });
           }
 
           const gzip = Buffer.concat(chunkBuffers);
-          const raw = zlib.gunzipSync(gzip);
-          const output = path.join(process.cwd(), 'ecoscape-runtime-inspection');
-          fs.mkdirSync(output, { recursive: true });
-          fs.writeFileSync(path.join(output, 'ecoscape-runtime.raw'), raw);
+          fs.writeFileSync(path.join(output, 'ecoscape-runtime.gzip'), gzip);
 
-          const preview = raw.subarray(0, Math.min(raw.length, 4096));
-          let parsed = null;
+          let raw = null;
+          let strictError = null;
+          let partialError = null;
           try {
-            parsed = JSON.parse(raw.toString('utf8'));
-          } catch {}
+            raw = zlib.gunzipSync(gzip);
+          } catch (error) {
+            strictError = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+            try {
+              raw = zlib.gunzipSync(gzip, { finishFlush: zlib.constants.Z_SYNC_FLUSH });
+            } catch (partial) {
+              partialError = partial instanceof Error ? `${partial.name}: ${partial.message}` : String(partial);
+            }
+          }
+
+          if (raw) fs.writeFileSync(path.join(output, 'ecoscape-runtime.raw'), raw);
+          const preview = raw ? raw.subarray(0, Math.min(raw.length, 4096)) : Buffer.alloc(0);
+          let parsed = null;
+          if (raw) {
+            try { parsed = JSON.parse(raw.toString('utf8')); } catch {}
+          }
 
           const metadata = {
             chunks,
             gzipBytes: gzip.length,
             gzipSha256: crypto.createHash('sha256').update(gzip).digest('hex'),
-            rawBytes: raw.length,
-            rawSha256: crypto.createHash('sha256').update(raw).digest('hex'),
+            gzipFirstHex: gzip.subarray(0, 64).toString('hex'),
+            gzipLastHex: gzip.subarray(Math.max(0, gzip.length - 64)).toString('hex'),
+            strictError,
+            partialError,
+            partialRecoverySucceeded: raw !== null,
+            rawBytes: raw?.length ?? null,
+            rawSha256: raw ? crypto.createHash('sha256').update(raw).digest('hex') : null,
             firstBytesHex: preview.subarray(0, 128).toString('hex'),
             firstText: preview.toString('utf8'),
+            lastBytesHex: raw ? raw.subarray(Math.max(0, raw.length - 128)).toString('hex') : null,
+            lastText: raw ? raw.subarray(Math.max(0, raw.length - 4096)).toString('utf8') : null,
             jsonParsed: parsed !== null,
             jsonTopLevelType: Array.isArray(parsed) ? 'array' : parsed && typeof parsed === 'object' ? 'object' : typeof parsed,
             jsonKeys: parsed && !Array.isArray(parsed) && typeof parsed === 'object' ? Object.keys(parsed).slice(0, 100) : [],
