@@ -1,4 +1,4 @@
-name: ECOSCAPE Runtime Inspect
+name: ECOSCAPE B120 Runtime Build
 
 on:
   push:
@@ -7,31 +7,93 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  inspect:
+  build-runtime:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Inspect existing compact runtime
-        working-directory: iyashiro-map-github-vercel
-        run: node scripts/inspect-ecoscape-runtime.mjs
-      - name: Probe Drive B120 public download route
+          cache: npm
+          cache-dependency-path: iyashiro-map-github-vercel/package-lock.json
+
+      - name: Download and verify Drive canonical bundles
         shell: bash
         run: |
-          set +e
-          url='https://drive.usercontent.google.com/download?id=1qOqlGpY3iZK-kSuuqr7QaTpWJnslvNaI&export=download&confirm=t'
-          code=$(curl -L --silent --show-error --max-time 120 --output /tmp/b120.zip --write-out '%{http_code}' "$url")
-          curl_status=$?
-          size=$(wc -c < /tmp/b120.zip 2>/dev/null || echo 0)
-          mime=$(file -b --mime-type /tmp/b120.zip 2>/dev/null || echo missing)
-          sha=$(sha256sum /tmp/b120.zip 2>/dev/null | awk '{print $1}')
-          unzip -t /tmp/b120.zip >/tmp/unzip.txt 2>&1
-          unzip_status=$?
-          printf 'curl_status=%s\nhttp_code=%s\nsize=%s\nmime=%s\nsha256=%s\nunzip_status=%s\n' "$curl_status" "$code" "$size" "$mime" "$sha" "$unzip_status"
-          cat /tmp/unzip.txt
-          exit 0
+          set -euo pipefail
+          mkdir -p /tmp/b120 /tmp/b116
+          curl -fL --retry 3 --max-time 180 \
+            'https://drive.usercontent.google.com/download?id=1qOqlGpY3iZK-kSuuqr7QaTpWJnslvNaI&export=download&confirm=t' \
+            -o /tmp/b120.zip
+          curl -fL --retry 3 --max-time 180 \
+            'https://drive.usercontent.google.com/download?id=1Qo4NlhU-k7nKD_e2YBwEkfyVOEK-te1S&export=download&confirm=t' \
+            -o /tmp/b116.zip
+          echo 'add1d47e2b06b12ad8fbc69027a3cb50d18c867b044583576a6d2536822e47c1  /tmp/b120.zip' | sha256sum -c -
+          echo 'd13a33f369012dbd472bfcf9d6ba65baac72a525d3f61949bff64506871e09ef  /tmp/b116.zip' | sha256sum -c -
+          unzip -q /tmp/b120.zip -d /tmp/b120
+          unzip -q /tmp/b116.zip -d /tmp/b116
+          unzip -t /tmp/b120.zip
+          unzip -t /tmp/b116.zip
+
+      - name: Normalize generator placeholders
+        working-directory: iyashiro-map-github-vercel
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/build-ecoscape-runtime-b120.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('{imports}', '__IMPORTS__', 1)
+          text = text.replace('{joined}', '__JOINED__', 1)
+          text = text.replace(
+              'RUNTIME_TEMPLATE.format(imports=imports, joined=joined)',
+              'RUNTIME_TEMPLATE.replace("__IMPORTS__", imports).replace("__JOINED__", joined)',
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
+          python -m py_compile scripts/build-ecoscape-runtime-b120.py
+
+      - name: Generate ECOSCAPE B120 runtime and adapter
+        working-directory: iyashiro-map-github-vercel
+        run: |
+          python scripts/build-ecoscape-runtime-b120.py \
+            --b120 /tmp/b120/ECOSCAPE_PROPERTY_PROFILE_INDEX_120662_B120.csv.gz \
+            --b116 /tmp/b116/ECOSCAPE_MW3_ZONE_EXPLAINABLE_RANKING_B116.csv \
+            --repo-root .
+          git diff --check
+
+      - name: Install and run production verification
+        working-directory: iyashiro-map-github-vercel
+        run: |
+          npm ci
+          npm test
+
+      - name: Commit generated runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            iyashiro-map-github-vercel/app/lib/location-profile/ecoscape-runtime-chunk-*.ts \
+            iyashiro-map-github-vercel/app/lib/location-profile/ecoscape-runtime.ts \
+            iyashiro-map-github-vercel/app/lib/location-profile/ecoscape-adapter.ts \
+            iyashiro-map-github-vercel/app/api/profile/route.ts \
+            iyashiro-map-github-vercel/tests/rendered-html.test.mjs \
+            iyashiro-map-github-vercel/docs/ECOSCAPE_B120_LOCATION_PROFILE_INTEGRATION_20260817.md \
+            iyashiro-map-github-vercel/docs/ECOSCAPE_B120_RUNTIME_BUILD_META.json \
+            iyashiro-map-github-vercel/scripts/build-ecoscape-runtime-b120.py
+          if git diff --cached --quiet; then
+            echo 'No generated changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Connect ECOSCAPE B120 runtime to LocationProfile'
+          git push origin HEAD:agent/connect-ecoscape-b120-runtime-v3
