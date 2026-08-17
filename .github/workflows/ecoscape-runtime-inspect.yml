@@ -28,18 +28,19 @@ jobs:
           const crypto = require('node:crypto');
 
           const base = path.join(process.cwd(), 'iyashiro-map-github-vercel', 'app', 'lib', 'location-profile');
-          let encoded = '';
+          const chunkBuffers = [];
           const chunks = [];
           for (let index = 0; index < 4; index += 1) {
             const file = path.join(base, `ecoscape-runtime-chunk-${index}.ts`);
             const source = fs.readFileSync(file, 'utf8');
             const match = source.match(/export default\s+"([A-Za-z0-9+/=]+)";/s);
             if (!match) throw new Error(`Unable to parse ${file}`);
-            encoded += match[1];
-            chunks.push({ index, encodedChars: match[1].length });
+            const bytes = Buffer.from(match[1], 'base64');
+            chunkBuffers.push(bytes);
+            chunks.push({ index, encodedChars: match[1].length, decodedBytes: bytes.length });
           }
 
-          const gzip = Buffer.from(encoded, 'base64');
+          const gzip = Buffer.concat(chunkBuffers);
           const raw = zlib.gunzipSync(gzip);
           const output = path.join(process.cwd(), 'ecoscape-runtime-inspection');
           fs.mkdirSync(output, { recursive: true });
@@ -53,7 +54,6 @@ jobs:
 
           const metadata = {
             chunks,
-            encodedChars: encoded.length,
             gzipBytes: gzip.length,
             gzipSha256: crypto.createHash('sha256').update(gzip).digest('hex'),
             rawBytes: raw.length,
