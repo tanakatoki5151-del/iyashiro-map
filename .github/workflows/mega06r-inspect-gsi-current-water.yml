@@ -1,0 +1,95 @@
+name: MEGA06R Inspect GSI Current Water Layers
+
+on:
+  push:
+    branches:
+      - agent/mega06r-w05-acquisition-20260817
+    paths:
+      - .github/workflows/mega06r-inspect-gsi-current-water.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-gsi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch and decode sample GSI vector tiles
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ROOT="$GITHUB_WORKSPACE/gsi-current-water-inspection"
+          mkdir -p "$ROOT/tiles"
+          python -m pip install --quiet mapbox-vector-tile
+
+          for spec in "14 14549 6451" "15 29099 12903" "16 58199 25806"; do
+            read -r z x y <<< "$spec"
+            url="https://cyberjapandata.gsi.go.jp/xyz/experimental_bvmap/${z}/${x}/${y}.pbf"
+            echo "$url" >> "$ROOT/REQUEST_URLS.txt"
+            curl --retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 30 --max-time 180 -fL "$url" -o "$ROOT/tiles/${z}_${x}_${y}.pbf"
+          done
+
+          python - "$ROOT" <<'PY'
+          import hashlib
+          import json
+          import sys
+          from collections import Counter, defaultdict
+          from pathlib import Path
+          import mapbox_vector_tile
+
+          root = Path(sys.argv[1])
+          summaries = []
+          all_layers = Counter()
+          code_by_layer = defaultdict(Counter)
+          key_by_layer = defaultdict(Counter)
+          examples = defaultdict(list)
+          for path in sorted((root / "tiles").glob("*.pbf")):
+              raw = path.read_bytes()
+              decoded = mapbox_vector_tile.decode(raw)
+              tile_summary = {
+                  "file": path.name,
+                  "sizeBytes": len(raw),
+                  "sha256": hashlib.sha256(raw).hexdigest(),
+                  "layers": {},
+              }
+              for layer_name, layer in decoded.items():
+                  features = layer.get("features", [])
+                  all_layers[layer_name] += len(features)
+                  tile_summary["layers"][layer_name] = len(features)
+                  for feature in features:
+                      props = feature.get("properties") or {}
+                      for key in props:
+                          key_by_layer[layer_name][key] += 1
+                      for key in ("ftCode", "code", "class", "type", "vt_code"):
+                          if key in props:
+                              code_by_layer[layer_name][f"{key}={props[key]}"] += 1
+                      text = json.dumps(props, ensure_ascii=False)
+                      water_words = ("河", "川", "水", "湖", "池", "海", "岸", "堀", "運河", "水路")
+                      if any(w in text for w in water_words) and len(examples[layer_name]) < 20:
+                          examples[layer_name].append({"properties": props, "geometryType": feature.get("geometry", {}).get("type")})
+              summaries.append(tile_summary)
+
+          output = {
+              "tiles": summaries,
+              "allLayerFeatureCounts": dict(all_layers),
+              "propertyKeysByLayer": {k: dict(v) for k, v in key_by_layer.items()},
+              "codeCountsByLayer": {k: dict(v) for k, v in code_by_layer.items()},
+              "waterKeywordExamplesByLayer": dict(examples),
+          }
+          (root / "INSPECTION.json").write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps(output, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload inspection artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mega06r-gsi-current-water-inspection-r1
+          path: gsi-current-water-inspection/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
