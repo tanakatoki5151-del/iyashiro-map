@@ -1,9 +1,11 @@
-name: MEGA06R Acquire W05 Tokyo Kanagawa
+name: MEGA06R Acquire W05 Kanto Boundary Buffer
 
 on:
   push:
     branches:
       - agent/mega06r-w05-acquisition-20260817
+    paths:
+      - .github/workflows/mega06r-acquire-w05-tokyo-kanagawa.yml
   workflow_dispatch:
 
 permissions:
@@ -12,19 +14,19 @@ permissions:
 jobs:
   acquire-w05:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download and validate W05 Tokyo and Kanagawa
+      - name: Download and validate W05 Saitama Chiba Tokyo Kanagawa
         shell: bash
         run: |
           set -Eeuo pipefail
           ROOT="$GITHUB_WORKSPACE/w05-artifact"
           RAW="$ROOT/raw"
           EXTRACTED="$ROOT/extracted"
-          mkdir -p "$RAW" "$EXTRACTED/tokyo" "$EXTRACTED/kanagawa"
+          mkdir -p "$RAW" "$EXTRACTED/saitama" "$EXTRACTED/chiba" "$EXTRACTED/tokyo" "$EXTRACTED/kanagawa"
 
           download_one() {
             local pref="$1"
@@ -67,12 +69,17 @@ jobs:
             curl --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 30 --max-time 300 -fL "$resolved" -o "$outfile"
           }
 
+          download_one 11 "$RAW/W05-08_11_GML.zip"
+          download_one 12 "$RAW/W05-08_12_GML.zip"
           download_one 13 "$RAW/W05-08_13_GML.zip"
           download_one 14 "$RAW/W05-08_14_GML.zip"
 
           file "$RAW"/*.zip | tee "$ROOT/FILE_TYPES.txt"
-          unzip -t "$RAW/W05-08_13_GML.zip" | tee "$ROOT/ZIPTEST_TOKYO.txt"
-          unzip -t "$RAW/W05-08_14_GML.zip" | tee "$ROOT/ZIPTEST_KANAGAWA.txt"
+          for pref in 11 12 13 14; do
+            unzip -t "$RAW/W05-08_${pref}_GML.zip" | tee "$ROOT/ZIPTEST_${pref}.txt"
+          done
+          unzip -q "$RAW/W05-08_11_GML.zip" -d "$EXTRACTED/saitama"
+          unzip -q "$RAW/W05-08_12_GML.zip" -d "$EXTRACTED/chiba"
           unzip -q "$RAW/W05-08_13_GML.zip" -d "$EXTRACTED/tokyo"
           unzip -q "$RAW/W05-08_14_GML.zip" -d "$EXTRACTED/kanagawa"
 
@@ -95,22 +102,25 @@ jobs:
                   "sizeBytes": len(data),
                   "sha256": hashlib.sha256(data).hexdigest(),
               })
+          prefectures = [
+              ("11", "Saitama"),
+              ("12", "Chiba"),
+              ("13", "Tokyo"),
+              ("14", "Kanagawa"),
+          ]
           manifest = {
-              "buildId": "mega06r-w05-tokyo-kanagawa-acquisition-r1",
+              "buildId": "mega06r-w05-kanto-boundary-buffer-acquisition-r2a",
               "generatedAtUtc": datetime.now(timezone.utc).isoformat(),
+              "purpose": "Prevent false river-network terminals at Tokyo, Yokohama and Kawasaki study boundaries.",
               "sources": [
                   {
                       "dataset": "MLIT National Land Numerical Information W05 River",
-                      "prefectureCode": "13",
+                      "prefectureCode": code,
+                      "prefectureNameEn": name,
                       "fiscalYear": "2008",
-                      "expectedArchive": "W05-08_13_GML.zip",
-                  },
-                  {
-                      "dataset": "MLIT National Land Numerical Information W05 River",
-                      "prefectureCode": "14",
-                      "fiscalYear": "2008",
-                      "expectedArchive": "W05-08_14_GML.zip",
-                  },
+                      "expectedArchive": f"W05-08_{code}_GML.zip",
+                  }
+                  for code, name in prefectures
               ],
               "files": files,
           }
@@ -120,10 +130,10 @@ jobs:
           )
           PY
 
-      - name: Upload W05 source artifact
+      - name: Upload W05 Kanto source artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mega06r-w05-tokyo-kanagawa-r1
+          name: mega06r-w05-kanto-boundary-buffer-r2a
           path: w05-artifact/
           if-no-files-found: error
           retention-days: 7
