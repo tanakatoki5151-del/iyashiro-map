@@ -1,0 +1,95 @@
+name: MEGA06R Acquire CSIS Stream Topology
+
+on:
+  push:
+    branches:
+      - agent/mega06r-w05-acquisition-20260817
+    paths:
+      - .github/workflows/mega06r-acquire-csis-stream-topology.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquire-csis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Acquire and validate CSIS stream topology
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ROOT="$GITHUB_WORKSPACE/csis-stream-artifact"
+          mkdir -p "$ROOT"
+          URL="https://infra-br.csis.u-tokyo.ac.jp/search_stream?lon=139.684&lat=35.565&radius=40000&rows=10000"
+          echo "$URL" > "$ROOT/REQUEST_URL.txt"
+          curl --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 30 --max-time 600 -fL "$URL" -o "$ROOT/CSIS_STREAM_40KM.geojson"
+
+          python - "$ROOT" <<'PY'
+          import hashlib
+          import json
+          import sys
+          from collections import Counter
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          root = Path(sys.argv[1])
+          path = root / "CSIS_STREAM_40KM.geojson"
+          data = json.loads(path.read_text(encoding="utf-8"))
+          features = data.get("features", [])
+          if not isinstance(features, list):
+              raise SystemExit("CSIS response does not contain a feature list")
+          if len(features) == 0:
+              raise SystemExit("CSIS response returned zero features")
+          if len(features) >= 10000:
+              raise SystemExit("CSIS response reached rows limit; tiled acquisition required")
+
+          stream_ids = []
+          next_counts = Counter()
+          layers = Counter()
+          missing = Counter()
+          for feature in features:
+              props = feature.get("properties") or {}
+              sid = props.get("StreamID")
+              if sid is None:
+                  missing["StreamID"] += 1
+              else:
+                  stream_ids.append(str(sid))
+              for field in ["W05_001", "W05_002", "W05_006", "W05_009", "W05_010", "H_009", "H_010", "next_SID"]:
+                  if field not in props:
+                      missing[field] += 1
+              next_counts[len(props.get("next_SID") or [])] += 1
+              layers[str(props.get("layer"))] += 1
+
+          if len(stream_ids) != len(set(stream_ids)):
+              raise SystemExit("Duplicate StreamID values in CSIS response")
+
+          summary = {
+              "buildId": "mega06r-csis-stream-topology-acquisition-r1",
+              "generatedAtUtc": datetime.now(timezone.utc).isoformat(),
+              "requestUrl": (root / "REQUEST_URL.txt").read_text().strip(),
+              "featureCount": len(features),
+              "uniqueStreamIdCount": len(set(stream_ids)),
+              "nextSidCountDistribution": dict(sorted(next_counts.items())),
+              "layerDistribution": dict(sorted(layers.items())),
+              "missingFieldCount": dict(sorted(missing.items())),
+              "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+              "licenseBoundary": "CSIS output is research-validation-only until downstream reuse conditions are adjudicated; MLIT W05 remains the primary source archive.",
+          }
+          (root / "SUMMARY.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+          (root / "SHA256SUMS.txt").write_text(f"{summary['sha256']}  {path.name}\n", encoding="utf-8")
+          print(json.dumps(summary, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload CSIS topology artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mega06r-csis-stream-topology-r1
+          path: csis-stream-artifact/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
