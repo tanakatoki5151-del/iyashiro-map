@@ -56,6 +56,18 @@ The explicit PLATEAU source-hole fixture `g101-269` remains `partial` with `UNKN
 - legacy scores unchanged: PASS
 - cross-project write-back: 0
 
+## Git and preview release record
+
+- Pull request: `#15 Connect ECOSCAPE B120 to LocationProfile`
+- Main integration commit: `b2669f6ce3ed30fc878227e97fcfbdaaaa15f86b`
+- Final validated preview: `dpl_6U9Hzypqea9HECpyWJQtRmQNs5UD`
+- Preview source commit: `f60839806cefbd871e5e4141100c0111a11a46fa`
+- Preview state: `READY`
+- Authenticated preview API readback: `HTTP 200`
+- Preview readback confirmed the fixed cell, ECOSCAPE dataset version, P25 state, pillar counts, no-score/no-override locks, and unchanged legacy scores.
+
+The remaining B123 gate is production-alias readback and final Drive/NEXUS shipment registration.
+
 ## Guardrails
 
 1. UNKNOWN is neither a score nor an adverse condition.
