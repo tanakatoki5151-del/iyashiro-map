@@ -1,0 +1,174 @@
+name: ECOSCAPE B122 Preview E2E Temporary
+
+on:
+  push:
+    branches:
+      - agent/connect-ecoscape-b120-runtime-v3
+    paths:
+      - .github/workflows/ecoscape-b122-preview-e2e-temp.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preview-e2e:
+    runs-on: ubuntu-latest
+    env:
+      PREVIEW_BASE: https://iyashiro-1ordofdeg-tanakatoki5151-dels-projects.vercel.app
+      VERCEL_SHARE: JSHxAYcGKvNctWkZQ7FK1jhYjAfy8YJX
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: iyashiro-map-github-vercel/package-lock.json
+
+      - name: Install browser test runtime
+        working-directory: iyashiro-map-github-vercel
+        run: |
+          npm ci
+          npm install --no-save --package-lock=false @playwright/test@1.58.2
+          npx playwright install --with-deps chromium
+
+      - name: Write protected-preview E2E
+        working-directory: iyashiro-map-github-vercel
+        shell: bash
+        run: |
+          cat > tests/ecoscape-preview-e2e.temp.spec.mjs <<'TEST'
+          import { test, expect, devices } from '@playwright/test';
+          import { mkdir, writeFile } from 'node:fs/promises';
+
+          const base = process.env.PREVIEW_BASE;
+          const share = process.env.VERCEL_SHARE;
+          const address = '東京都豊島区目白五丁目8-1';
+
+          test.use({ ...devices['iPhone 13'] });
+
+          test('ECOSCAPE B122 protected preview API, UI and mobile readback', async ({ page, context }) => {
+            const consoleErrors = [];
+            page.on('console', (message) => {
+              if (message.type() === 'error') consoleErrors.push(message.text());
+            });
+            page.on('pageerror', (error) => consoleErrors.push(`pageerror:${error.message}`));
+
+            await page.goto(`${base}/?_vercel_share=${share}`, { waitUntil: 'networkidle' });
+
+            const coordinateResponse = await context.request.get(
+              `${base}/api/profile?lat=35.723007&lng=139.694672`,
+            );
+            expect(coordinateResponse.status()).toBe(200);
+            const coordinate = await coordinateResponse.json();
+            const ecoscape = coordinate.layers.ecoscape;
+            expect(coordinate.spatialContext.cellId).toBe('g130-240');
+            expect(ecoscape.availability).toBe('available');
+            expect(ecoscape.datasetVersion).toBe('ECOSCAPE_PROPERTY_PROFILE_INDEX_120662_B120');
+            expect(ecoscape.scoringEffect).toBe('none');
+            expect(ecoscape.metadata.candidateOverride).toBe(false);
+            expect(ecoscape.findings[0].metadata.aggregateStateP25).toBe('CAUTION');
+            expect(ecoscape.findings[0].metadata.knownPillarsP25).toBe(4);
+            expect(ecoscape.findings[0].metadata.favorablePillarsP25).toBe(1);
+            expect(ecoscape.findings[0].metadata.cautionPillarsP25).toBe(2);
+            expect(coordinate.legacyRuntime.theory.score).toBe(50);
+            expect(coordinate.legacyRuntime.modern.score).toBe(75);
+            expect(coordinate.legacyRuntime.combined.score).toBe(75);
+
+            const addressResponse = await context.request.get(
+              `${base}/api/profile?q=${encodeURIComponent(address)}`,
+            );
+            expect(addressResponse.status()).toBe(200);
+            const addressProfile = await addressResponse.json();
+            expect(addressProfile.spatialContext.cellId).toBe('g130-240');
+            expect(addressProfile.layers.ecoscape.availability).toBe('available');
+
+            const unknownResponse = await context.request.get(
+              `${base}/api/profile?lat=35.74891843334531&lng=139.7270419646649`,
+            );
+            expect(unknownResponse.status()).toBe(200);
+            const unknown = await unknownResponse.json();
+            expect(unknown.spatialContext.cellId).toBe('g101-269');
+            expect(unknown.layers.ecoscape.availability).toBe('partial');
+            expect(unknown.layers.ecoscape.findings[0].metadata.plateauStatus).toBe('UNKNOWN_SOURCE_TILE_404');
+            expect(unknown.layers.ecoscape.warnings.join(' ')).toContain('UNKNOWN');
+
+            await page.goto(`${base}/profile?q=${encodeURIComponent(address)}`, { waitUntil: 'networkidle' });
+            await expect(page.getByRole('heading', { name: /土地カルテ/ })).toBeVisible();
+            await expect(page.getByText('環境・植生', { exact: true })).toBeVisible();
+            await expect(page.getByText(/ECOSCAPE環境・住宅候補/)).toBeVisible();
+            await expect(page.getByText(/注意条件が優勢/)).toBeVisible();
+
+            const overflow = await page.evaluate(
+              () => document.documentElement.scrollWidth - window.innerWidth,
+            );
+            expect(overflow).toBeLessThanOrEqual(1);
+            expect(consoleErrors).toEqual([]);
+
+            await mkdir('preview-artifacts', { recursive: true });
+            await page.screenshot({
+              path: 'preview-artifacts/ecoscape-b122-mobile.png',
+              fullPage: true,
+            });
+            await writeFile(
+              'preview-artifacts/ecoscape-b122-readback.json',
+              JSON.stringify(
+                {
+                  deployment: base,
+                  coordinate: {
+                    cellId: coordinate.spatialContext.cellId,
+                    availability: ecoscape.availability,
+                    datasetVersion: ecoscape.datasetVersion,
+                    aggregateStateP25: ecoscape.findings[0].metadata.aggregateStateP25,
+                    knownPillarsP25: ecoscape.findings[0].metadata.knownPillarsP25,
+                    favorablePillarsP25: ecoscape.findings[0].metadata.favorablePillarsP25,
+                    cautionPillarsP25: ecoscape.findings[0].metadata.cautionPillarsP25,
+                    scoringEffect: ecoscape.scoringEffect,
+                    candidateOverride: ecoscape.metadata.candidateOverride,
+                    legacyScores: [
+                      coordinate.legacyRuntime.theory.score,
+                      coordinate.legacyRuntime.modern.score,
+                      coordinate.legacyRuntime.combined.score,
+                    ],
+                  },
+                  address: {
+                    query: address,
+                    cellId: addressProfile.spatialContext.cellId,
+                  },
+                  explicitUnknown: {
+                    cellId: unknown.spatialContext.cellId,
+                    availability: unknown.layers.ecoscape.availability,
+                    plateauStatus: unknown.layers.ecoscape.findings[0].metadata.plateauStatus,
+                  },
+                  mobileOverflowPx: overflow,
+                  consoleErrors,
+                },
+                null,
+                2,
+              ) + '\n',
+            );
+          });
+          TEST
+
+      - name: Run protected preview E2E
+        working-directory: iyashiro-map-github-vercel
+        run: npx playwright test tests/ecoscape-preview-e2e.temp.spec.mjs --reporter=line
+
+      - name: Capture production dependency audit
+        working-directory: iyashiro-map-github-vercel
+        shell: bash
+        run: |
+          mkdir -p preview-artifacts
+          npm audit --omit=dev --json > preview-artifacts/npm-audit-production.json || true
+          node - <<'NODE'
+          const audit = require('./preview-artifacts/npm-audit-production.json');
+          const counts = audit.metadata?.vulnerabilities ?? {};
+          console.log(JSON.stringify(counts));
+          if ((counts.critical ?? 0) > 0) process.exit(1);
+          NODE
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ecoscape-b122-preview-readback
+          path: iyashiro-map-github-vercel/preview-artifacts
+          if-no-files-found: error
+          retention-days: 14
