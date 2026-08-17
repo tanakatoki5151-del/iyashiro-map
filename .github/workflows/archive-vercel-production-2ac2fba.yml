@@ -1,0 +1,172 @@
+name: Archive Vercel production 2ac2fba
+
+on:
+  push:
+    branches:
+      - agent/drive-snapshot-20260817-2ac2fba
+
+permissions:
+  contents: read
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TARGET_SHA: 2ac2fba22e9af33ea43bf1b7291e93078286d9dd
+      TARGET_SHORT_SHA: 2ac2fba
+      PROJECT_ROOT: iyashiro-map-github-vercel
+      VERCEL_TEAM_ID: team_XHs1MwGtu8tSCPLDZ6zAJx7H
+      VERCEL_PROJECT_ID: prj_xeJLLwjG9pS8PoPg9i8RNCbeQhF2
+      VERCEL_DEPLOYMENT_ID: dpl_Dkd3HnAuzdVAjx8xQeQduQcKkaaw
+      VERCEL_DEPLOYMENT_URL: iyashiro-bqx24thz5-tanakatoki5151-dels-projects.vercel.app
+    steps:
+      - name: Check out exact production commit
+        uses: actions/checkout@v4
+        with:
+          ref: 2ac2fba22e9af33ea43bf1b7291e93078286d9dd
+          fetch-depth: 0
+
+      - name: Verify source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          git status --short
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: iyashiro-map-github-vercel/package-lock.json
+
+      - name: Install dependencies
+        working-directory: iyashiro-map-github-vercel
+        run: npm ci
+
+      - name: Lint
+        working-directory: iyashiro-map-github-vercel
+        run: npm run lint
+
+      - name: Production build
+        working-directory: iyashiro-map-github-vercel
+        run: npm run build
+
+      - name: Build immutable source archive and restore bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p snapshot
+
+          git archive \
+            --format=zip \
+            --prefix="iyashiro-map-github-vercel-${TARGET_SHORT_SHA}/" \
+            --output="snapshot/iyashiro-map-vercel-production-source-20260817-${TARGET_SHORT_SHA}.zip" \
+            "${TARGET_SHA}:${PROJECT_ROOT}"
+
+          git update-ref refs/heads/snapshot-main "$TARGET_SHA"
+          git bundle create \
+            "snapshot/iyashiro-map-main-history-20260817-${TARGET_SHORT_SHA}.bundle" \
+            refs/heads/snapshot-main
+          git update-ref -d refs/heads/snapshot-main
+
+          git ls-tree -r --name-only "$TARGET_SHA" -- "$PROJECT_ROOT" \
+            > snapshot/TRACKED_FILES_20260817.txt
+
+          python - <<'PY'
+          import json
+          import os
+          import pathlib
+          import re
+          import subprocess
+          from datetime import datetime, timezone
+
+          root = pathlib.Path(os.environ["PROJECT_ROOT"])
+          env_keys = set()
+          patterns = [
+              re.compile(r"process\.env\.([A-Za-z_][A-Za-z0-9_]*)"),
+              re.compile(r"process\.env\[['\"]([A-Za-z_][A-Za-z0-9_]*)['\"]\]"),
+          ]
+          for path in root.rglob("*"):
+              if not path.is_file() or any(part in {"node_modules", ".next", "dist", ".git"} for part in path.parts):
+                  continue
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except (UnicodeDecodeError, OSError):
+                  continue
+              for pattern in patterns:
+                  env_keys.update(pattern.findall(text))
+
+          target = os.environ["TARGET_SHA"]
+          tree = subprocess.check_output(["git", "rev-parse", f"{target}^{{tree}}"], text=True).strip()
+          tracked = subprocess.check_output(
+              ["git", "ls-tree", "-r", "--name-only", target, "--", os.environ["PROJECT_ROOT"]],
+              text=True,
+          ).splitlines()
+          commit_time = subprocess.check_output(
+              ["git", "show", "-s", "--format=%cI", target], text=True
+          ).strip()
+          manifest = {
+              "schemaVersion": "iyashiro-vercel-production-snapshot-v1",
+              "generatedAt": datetime.now(timezone.utc).isoformat(),
+              "repository": {
+                  "fullName": "tanakatoki5151-del/iyashiro-map",
+                  "branch": "main",
+                  "commit": target,
+                  "tree": tree,
+                  "commitTime": commit_time,
+                  "projectRoot": os.environ["PROJECT_ROOT"],
+                  "trackedSourceFileCount": len(tracked),
+              },
+              "vercel": {
+                  "teamId": os.environ["VERCEL_TEAM_ID"],
+                  "projectId": os.environ["VERCEL_PROJECT_ID"],
+                  "projectName": "iyashiro-map",
+                  "deploymentId": os.environ["VERCEL_DEPLOYMENT_ID"],
+                  "deploymentUrl": os.environ["VERCEL_DEPLOYMENT_URL"],
+                  "productionDomains": [
+                      "iyashiro-map.vercel.app",
+                      "iyashiro-map-tanakatoki5151-dels-projects.vercel.app",
+                      "iyashiro-map-git-main-tanakatoki5151-dels-projects.vercel.app",
+                  ],
+                  "framework": "nextjs",
+                  "nodeVersion": "24.x",
+                  "stateAtSnapshot": "READY",
+                  "target": "production",
+              },
+              "verification": {
+                  "npmCi": "passed",
+                  "lint": "passed",
+                  "productionBuild": "passed",
+              },
+              "environmentVariableKeysReferencedByTrackedSource": sorted(env_keys),
+              "security": {
+                  "secretValuesIncluded": False,
+                  "excluded": ["node_modules", ".next", "dist", "local caches", "environment files", "credential values"],
+              },
+          }
+          pathlib.Path("snapshot/VERCEL_PRODUCTION_MANIFEST_20260817.json").write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+          (
+            cd snapshot
+            sha256sum \
+              "iyashiro-map-vercel-production-source-20260817-${TARGET_SHORT_SHA}.zip" \
+              "iyashiro-map-main-history-20260817-${TARGET_SHORT_SHA}.bundle" \
+              TRACKED_FILES_20260817.txt \
+              VERCEL_PRODUCTION_MANIFEST_20260817.json \
+              > SHA256SUMS_20260817.txt
+          )
+
+      - name: Upload immutable archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: iyashiro-vercel-production-20260817-2ac2fba
+          path: snapshot/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
