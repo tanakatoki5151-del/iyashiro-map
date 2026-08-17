@@ -1,0 +1,293 @@
+name: MEGA06R Acquire GSI Current Water Z14
+
+on:
+  push:
+    branches:
+      - agent/mega06r-w05-acquisition-20260817
+    paths:
+      - .github/workflows/mega06r-acquire-gsi-current-water-z14.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquire-gsi-current-water:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install decoder
+        run: python -m pip install --quiet mapbox-vector-tile
+
+      - name: Acquire GSI vector tiles and extract water geometry
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ROOT="$GITHUB_WORKSPACE/gsi-current-water-z14"
+          TILES="$ROOT/raw_tiles"
+          mkdir -p "$TILES"
+
+          python - "$ROOT" <<'PY'
+          import csv
+          import math
+          import sys
+          from pathlib import Path
+
+          root = Path(sys.argv[1])
+          z = 14
+          bbox = {
+              "minLon": 139.44932429,
+              "minLat": 35.31278836,
+              "maxLon": 139.91862851,
+              "maxLat": 35.81763924,
+          }
+
+          def lon_to_x(lon, zoom):
+              return int(math.floor((lon + 180.0) / 360.0 * (2 ** zoom)))
+
+          def lat_to_y(lat, zoom):
+              lat_rad = math.radians(lat)
+              return int(math.floor((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * (2 ** zoom)))
+
+          xmin = lon_to_x(bbox["minLon"], z) - 1
+          xmax = lon_to_x(bbox["maxLon"], z) + 1
+          ymin = lat_to_y(bbox["maxLat"], z) - 1
+          ymax = lat_to_y(bbox["minLat"], z) + 1
+
+          rows = []
+          with (root / "TILE_REQUESTS.tsv").open("w", encoding="utf-8", newline="") as f:
+              writer = csv.writer(f, delimiter="\t")
+              writer.writerow(["z", "x", "y", "url", "output"])
+              for x in range(xmin, xmax + 1):
+                  for y in range(ymin, ymax + 1):
+                      url = f"https://cyberjapandata.gsi.go.jp/xyz/experimental_bvmap/{z}/{x}/{y}.pbf"
+                      output = f"{z}_{x}_{y}.pbf"
+                      writer.writerow([z, x, y, url, output])
+                      rows.append((z, x, y, url, output))
+
+          manifest = {
+              "buildId": "mega06r-gsi-current-water-z14-acquisition-r1",
+              "zoom": z,
+              "studyBboxWgs84": bbox,
+              "oneTileBufferApplied": True,
+              "xRange": [xmin, xmax],
+              "yRange": [ymin, ymax],
+              "tileRequestCount": len(rows),
+              "sourceUrlTemplate": "https://cyberjapandata.gsi.go.jp/xyz/experimental_bvmap/{z}/{x}/{y}.pbf",
+              "sourceRole": "current-geometry delta only; W05 topology and flow direction remain authoritative for R2A/R2B",
+          }
+          import json
+          (root / "REQUEST_MANIFEST.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps(manifest, ensure_ascii=False, indent=2))
+          PY
+
+          tail -n +2 "$ROOT/TILE_REQUESTS.tsv" | cut -f4-5 | \
+            xargs -P 10 -n 2 bash -c '
+              url="$1"; out="$2";
+              if curl --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+                  --connect-timeout 30 --max-time 240 -fL "$url" -o "'"$TILES"'/$out"; then
+                printf "OK\t%s\t%s\n" "$out" "$(stat -c%s "'"$TILES"'/$out")" >> "'"$ROOT"'/DOWNLOAD_STATUS.tsv"
+              else
+                printf "MISSING_OR_FAILED\t%s\t0\n" "$out" >> "'"$ROOT"'/DOWNLOAD_STATUS.tsv"
+                rm -f "'"$TILES"'/$out"
+              fi
+            ' _
+
+          sort -o "$ROOT/DOWNLOAD_STATUS.tsv" "$ROOT/DOWNLOAD_STATUS.tsv"
+
+          python - "$ROOT" <<'PY'
+          import csv
+          import gzip
+          import hashlib
+          import json
+          import math
+          import sys
+          from collections import Counter
+          from pathlib import Path
+
+          import mapbox_vector_tile
+
+          root = Path(sys.argv[1])
+          tiles_dir = root / "raw_tiles"
+          request_manifest = json.loads((root / "REQUEST_MANIFEST.json").read_text(encoding="utf-8"))
+          study_bbox = request_manifest["studyBboxWgs84"]
+          z = request_manifest["zoom"]
+          n = 2 ** z
+
+          def tile_point_to_lonlat(tile_x, tile_y, extent, point):
+              px, py = point
+              x_norm = (tile_x + (float(px) / extent)) / n
+              y_norm = (tile_y + ((extent - float(py)) / extent)) / n
+              lon = x_norm * 360.0 - 180.0
+              lat = math.degrees(math.atan(math.sinh(math.pi * (1.0 - 2.0 * y_norm))))
+              return [lon, lat]
+
+          def transform_geometry(geometry, tile_x, tile_y, extent):
+              gtype = geometry.get("type")
+              coords = geometry.get("coordinates")
+              if gtype == "Point":
+                  out = tile_point_to_lonlat(tile_x, tile_y, extent, coords)
+              elif gtype in ("MultiPoint", "LineString"):
+                  out = [tile_point_to_lonlat(tile_x, tile_y, extent, p) for p in coords]
+              elif gtype in ("MultiLineString", "Polygon"):
+                  out = [[tile_point_to_lonlat(tile_x, tile_y, extent, p) for p in part] for part in coords]
+              elif gtype == "MultiPolygon":
+                  out = [
+                      [[tile_point_to_lonlat(tile_x, tile_y, extent, p) for p in ring] for ring in polygon]
+                      for polygon in coords
+                  ]
+              else:
+                  raise ValueError(f"Unsupported geometry type: {gtype}")
+              return {"type": gtype, "coordinates": out}
+
+          def iter_points(coords):
+              if not coords:
+                  return
+              if isinstance(coords[0], (int, float)):
+                  yield coords
+              else:
+                  for item in coords:
+                      yield from iter_points(item)
+
+          def geometry_bbox(geometry):
+              points = list(iter_points(geometry["coordinates"]))
+              xs = [p[0] for p in points]
+              ys = [p[1] for p in points]
+              return min(xs), min(ys), max(xs), max(ys)
+
+          def bbox_intersects(a, b):
+              return not (a[2] < b[0] or a[0] > b[2] or a[3] < b[1] or a[1] > b[3])
+
+          clip_bbox = (
+              study_bbox["minLon"],
+              study_bbox["minLat"],
+              study_bbox["maxLon"],
+              study_bbox["maxLat"],
+          )
+
+          combined_features = []
+          river_features = []
+          waterarea_features = []
+          tile_rows = []
+          layer_counts = Counter()
+          ftcode_counts = Counter()
+          geometry_counts = Counter()
+          parse_errors = []
+
+          for path in sorted(tiles_dir.glob("*.pbf")):
+              z_s, x_s, y_s = path.stem.split("_")
+              tile_x, tile_y = int(x_s), int(y_s)
+              raw = path.read_bytes()
+              tile_sha = hashlib.sha256(raw).hexdigest()
+              tile_feature_count = 0
+              try:
+                  decoded = mapbox_vector_tile.decode(raw, default_options={"y_coord_down": False})
+                  for layer_name in ("river", "waterarea"):
+                      layer = decoded.get(layer_name)
+                      if not layer:
+                          continue
+                      extent = int(layer.get("extent") or 4096)
+                      for idx, feature in enumerate(layer.get("features") or []):
+                          geometry = transform_geometry(feature.get("geometry") or {}, tile_x, tile_y, extent)
+                          if not bbox_intersects(geometry_bbox(geometry), clip_bbox):
+                              continue
+                          props = dict(feature.get("properties") or {})
+                          props.update({
+                              "sourceLayer": layer_name,
+                              "sourceZoom": z,
+                              "sourceTileX": tile_x,
+                              "sourceTileY": tile_y,
+                              "sourceTileFeatureIndex": idx,
+                              "sourceEpoch": "GSI_Vector_updated_2026-04-01",
+                              "sourceRole": "current_geometry_delta_not_flow_topology",
+                          })
+                          out_feature = {
+                              "type": "Feature",
+                              "id": f"GSI-Z{z}-{tile_x}-{tile_y}-{layer_name}-{idx}",
+                              "properties": props,
+                              "geometry": geometry,
+                          }
+                          combined_features.append(out_feature)
+                          if layer_name == "river":
+                              river_features.append(out_feature)
+                          else:
+                              waterarea_features.append(out_feature)
+                          tile_feature_count += 1
+                          layer_counts[layer_name] += 1
+                          ftcode_counts[f"{layer_name}:{props.get('ftCode')}"] += 1
+                          geometry_counts[geometry["type"]] += 1
+              except Exception as exc:
+                  parse_errors.append({"tile": path.name, "error": repr(exc)})
+              tile_rows.append({
+                  "tile": path.name,
+                  "sizeBytes": len(raw),
+                  "sha256": tile_sha,
+                  "retainedWaterFeatureCount": tile_feature_count,
+              })
+
+          def write_geojson_gz(name, features):
+              output = {"type": "FeatureCollection", "features": features}
+              with gzip.open(root / name, "wt", encoding="utf-8", compresslevel=6) as f:
+                  json.dump(output, f, ensure_ascii=False, separators=(",", ":"))
+
+          write_geojson_gz("GSI_CURRENT_WATER_Z14_SEGMENTS.geojson.gz", combined_features)
+          write_geojson_gz("GSI_CURRENT_RIVER_Z14_SEGMENTS.geojson.gz", river_features)
+          write_geojson_gz("GSI_CURRENT_WATERAREA_Z14_SEGMENTS.geojson.gz", waterarea_features)
+
+          with (root / "TILE_INVENTORY.csv").open("w", encoding="utf-8", newline="") as f:
+              writer = csv.DictWriter(f, fieldnames=["tile", "sizeBytes", "sha256", "retainedWaterFeatureCount"])
+              writer.writeheader()
+              writer.writerows(tile_rows)
+
+          status_counts = Counter()
+          with (root / "DOWNLOAD_STATUS.tsv").open(encoding="utf-8") as f:
+              for line in f:
+                  status_counts[line.split("\t", 1)[0]] += 1
+
+          summary = {
+              "buildId": "mega06r-gsi-current-water-z14-acquisition-r1",
+              "sourceEpoch": "GSI_Vector_updated_2026-04-01",
+              "zoom": z,
+              "studyBboxWgs84": study_bbox,
+              "requestedTileCount": request_manifest["tileRequestCount"],
+              "downloadStatusCounts": dict(status_counts),
+              "decodedTileCount": len(tile_rows),
+              "parseErrorCount": len(parse_errors),
+              "parseErrors": parse_errors[:50],
+              "retainedFeatureCount": len(combined_features),
+              "retainedRiverFeatureCount": len(river_features),
+              "retainedWaterareaFeatureCount": len(waterarea_features),
+              "layerCounts": dict(layer_counts),
+              "ftCodeCounts": dict(ftcode_counts),
+              "geometryTypeCounts": dict(geometry_counts),
+              "interpretationBoundary": [
+                  "GSI geometry is used as a 2026 current-geometry delta layer.",
+                  "W05 topology and direction are not overwritten.",
+                  "Absence at zoom 14 is NOT interpreted as river removal; it is not_observed_at_GSI_z14 and may trigger targeted zoom-16 review.",
+              ],
+          }
+          (root / "SUMMARY.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+          (root / "PARSE_ERRORS.json").write_text(json.dumps(parse_errors, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+          if parse_errors:
+              raise SystemExit(f"GSI tile parse errors: {len(parse_errors)}")
+          if len(river_features) == 0:
+              raise SystemExit("No GSI river features retained")
+          PY
+
+          rm -rf "$TILES"
+          find "$ROOT" -type f -printf '%P\t%s bytes\n' | sort > "$ROOT/FILE_INVENTORY.tsv"
+          find "$ROOT" -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > "$ROOT/SHA256SUMS.txt"
+
+      - name: Upload GSI current-water artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mega06r-gsi-current-water-z14-r1
+          path: gsi-current-water-z14/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
