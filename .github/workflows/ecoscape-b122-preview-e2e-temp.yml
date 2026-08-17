@@ -44,7 +44,7 @@ jobs:
           const share = process.env.VERCEL_SHARE;
           const address = '東京都豊島区目白五丁目8-1';
 
-          test.use({ ...devices['iPhone 13'] });
+          test.use({ ...devices['iPhone 13'], browserName: 'chromium' });
 
           test('ECOSCAPE B122 protected preview API, UI and mobile readback', async ({ page, context }) => {
             const consoleErrors = [];
