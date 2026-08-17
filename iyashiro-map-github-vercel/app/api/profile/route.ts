@@ -5,6 +5,7 @@ import { composeLocationProfile } from "@/app/lib/location-profile/compose";
 import { resolveCanonicalCell } from "@/app/lib/location-profile/canonical-cell";
 import { buildPlaceGraphLayer, type PlaceGraphAdapterData } from "@/app/lib/location-profile/placegraph-adapter";
 import { placeGraphSparseCells } from "@/app/lib/location-profile/placegraph-sparse-runtime";
+import { buildV10Layer } from "@/app/lib/location-profile/v10-adapter";
 import type { LayerId, LocationLayer, LocationProfileAudience } from "@/app/lib/location-profile/types";
 
 export const dynamic = "force-dynamic";
@@ -55,6 +56,7 @@ function readinessLayer(
   project: string,
   state: "partial" | "not_available",
   note: string,
+  metadata?: Record<string, unknown>,
 ): LocationLayer {
   return {
     layerId,
@@ -65,7 +67,10 @@ function readinessLayer(
     datasetVersion: null,
     findings: [],
     warnings: [note],
-    metadata: { integrationState: state === "partial" ? "ADAPTER_STAGED" : "FORMAL_RELEASE_PENDING" },
+    metadata: {
+      integrationState: state === "partial" ? "ADAPTER_STAGED" : "FORMAL_RELEASE_PENDING",
+      ...metadata,
+    },
   };
 }
 
@@ -98,37 +103,37 @@ export async function GET(request: NextRequest) {
         : []),
     ];
 
+    const v10 = await buildV10Layer(cell.gridRow, cell.gridCol);
+
     const layers: LocationLayer[] = [
       placeGraph,
-      readinessLayer(
-        "v10Legacy",
-        "V10",
-        "partial",
-        "V10 has a canonical-cell adapter upstream; its fact payload is not yet duplicated into LocationProfile v2. Legacy diagnosis remains available separately.",
-      ),
+      v10,
       readinessLayer(
         "v11Terrain",
         "V11",
         "partial",
-        "V11 history/terrain contracts are staged. Missing evidence must remain UNKNOWN and is never converted to safety.",
+        "V11 history/terrain contracts are staged. Missing evidence remains UNKNOWN and is never converted to safety.",
+        { historyContract: "CURRENT_V11_MASTER_v16", terrainPointer: "CURRENT_V11_TERRAIN_FULL_AREA_MASTER_v4" },
       ),
       readinessLayer(
         "veil",
         "VEIL",
         "partial",
-        "VEIL is currently partial/cohort-backed. Folklore, incident, taboo and physical facts will stay separated when the payload adapter is connected.",
+        "VEIL is currently partial/cohort-backed. Folklore, incident, taboo and physical facts stay separated until their canonical adapters are connected.",
       ),
       readinessLayer(
         "underland",
         "UNDERLAND",
         "partial",
-        "UNDERLAND is currently cohort/pointer-backed. Outside researched cohorts means NOT_RESEARCHED, not a positive or negative conclusion.",
+        "UNDERLAND serves an operational response for any canonical cell, but detailed full-area lane payloads are not yet bundled into this website runtime.",
+        { operationalAnyCell: true, convergenceGate: "OPEN_SCIENTIFIC_GATE", userActionRequired: false },
       ),
       readinessLayer(
         "limen",
         "LIMEN",
         "partial",
-        "LIMEN is currently partial. Boundary, ritual and relocation facts require identity/geometry before positive spatial claims.",
+        "LIMEN has explicit status for all 120,662 cells and 1,413 candidate/context cells, but historical-original geometry promotions remain zero. Candidate status is not a positive conclusion.",
+        { formalStatusCoverageCells: 120662, candidateOrContextCells: 1413, historicalOriginalGeometryPromotions: 0 },
       ),
       readinessLayer(
         "ecoscape",
@@ -180,6 +185,7 @@ export async function GET(request: NextRequest) {
           "Operational L4 uses a user-approved 100m tolerance.",
           "No known relation is not evidence that a cell is historically empty or safe.",
           "Research projects keep their own evidence status; LocationProfile does not rescore them.",
+          "V10 frozen-cell facts are now connected read-only; V11/VEIL/UNDERLAND/LIMEN detailed fact adapters continue incrementally.",
         ],
       },
     });
