@@ -73,6 +73,7 @@ jobs:
       - name: Install and run production verification
         working-directory: iyashiro-map-github-vercel
         run: |
+          chmod +x scripts/*.sh
           npm ci
           npm test
 
