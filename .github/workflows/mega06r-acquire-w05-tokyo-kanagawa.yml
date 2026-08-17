@@ -53,16 +53,16 @@ jobs:
               -o "$api_xml"
             local resolved
             resolved=$(python - "$api_xml" <<'PY'
-import re
-import sys
-from pathlib import Path
-text = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
-urls = re.findall(r"https?://[^<\s\"]+\.zip", text)
-if not urls:
-    raise SystemExit("No ZIP URL returned by official API")
-print(urls[0].replace("&amp;", "&"))
-PY
-)
+          import re
+          import sys
+          from pathlib import Path
+          text = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+          urls = re.findall(r"https?://[^<\s\"]+\.zip", text)
+          if not urls:
+              raise SystemExit("No ZIP URL returned by official API")
+          print(urls[0].replace("&amp;", "&"))
+          PY
+          )
             echo "Resolved API URL: $resolved" | tee -a "$ROOT/DOWNLOAD_LOG.txt"
             curl --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 30 --max-time 300 -fL "$resolved" -o "$outfile"
           }
@@ -80,41 +80,45 @@ PY
           sha256sum "$RAW"/*.zip | tee "$ROOT/SHA256SUMS.txt"
 
           python - "$ROOT" <<'PY'
-import hashlib
-import json
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
-root = Path(sys.argv[1])
-files = []
-for path in sorted(p for p in root.rglob("*") if p.is_file()):
-    data = path.read_bytes()
-    files.append({
-        "path": str(path.relative_to(root)),
-        "sizeBytes": len(data),
-        "sha256": hashlib.sha256(data).hexdigest(),
-    })
-manifest = {
-    "buildId": "mega06r-w05-tokyo-kanagawa-acquisition-r1",
-    "generatedAtUtc": datetime.now(timezone.utc).isoformat(),
-    "sources": [
-        {
-            "dataset": "MLIT National Land Numerical Information W05 River",
-            "prefectureCode": "13",
-            "fiscalYear": "2008",
-            "expectedArchive": "W05-08_13_GML.zip",
-        },
-        {
-            "dataset": "MLIT National Land Numerical Information W05 River",
-            "prefectureCode": "14",
-            "fiscalYear": "2008",
-            "expectedArchive": "W05-08_14_GML.zip",
-        },
-    ],
-    "files": files,
-}
-(root / "MANIFEST.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-PY
+          import hashlib
+          import json
+          import sys
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          root = Path(sys.argv[1])
+          files = []
+          for path in sorted(p for p in root.rglob("*") if p.is_file()):
+              data = path.read_bytes()
+              files.append({
+                  "path": str(path.relative_to(root)),
+                  "sizeBytes": len(data),
+                  "sha256": hashlib.sha256(data).hexdigest(),
+              })
+          manifest = {
+              "buildId": "mega06r-w05-tokyo-kanagawa-acquisition-r1",
+              "generatedAtUtc": datetime.now(timezone.utc).isoformat(),
+              "sources": [
+                  {
+                      "dataset": "MLIT National Land Numerical Information W05 River",
+                      "prefectureCode": "13",
+                      "fiscalYear": "2008",
+                      "expectedArchive": "W05-08_13_GML.zip",
+                  },
+                  {
+                      "dataset": "MLIT National Land Numerical Information W05 River",
+                      "prefectureCode": "14",
+                      "fiscalYear": "2008",
+                      "expectedArchive": "W05-08_14_GML.zip",
+                  },
+              ],
+              "files": files,
+          }
+          (root / "MANIFEST.json").write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2),
+              encoding="utf-8",
+          )
+          PY
 
       - name: Upload W05 source artifact
         uses: actions/upload-artifact@v4
