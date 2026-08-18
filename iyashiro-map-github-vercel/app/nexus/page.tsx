@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import NexusClient from "./nexus-client";
+import NexusClientV3 from "./nexus-client-v3";
 
 export const metadata: Metadata = {
   title: "NEXUS 物件判定 | イヤシロ土地判定",
-  description: "家賃条件、掲載の現在性、物件の同一性、土地の調査結果を分けて確認する物件判定画面です。",
+  description: "月17万円・1〜3階・15㎡以上の物件条件、内部募集サンプル、土地研究を分けて確認するNEXUS物件判定です。",
 };
 
 export default function NexusPage() {
-  return <NexusClient />;
+  return <NexusClientV3 />;
 }
