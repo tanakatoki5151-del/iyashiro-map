@@ -1,0 +1,30 @@
+name: EVENTREG legacy NPA data executor
+
+on:
+  push:
+    branches:
+      - eventreg-npa-legacy-repair-20260818
+
+permissions:
+  contents: read
+
+jobs:
+  extract-target48:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out the triggering branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Extract and repair NPA 2019-2021 target48 shards
+        run: python scripts/eventreg_extract_npa_legacy.py
+      - name: Upload repaired legacy shards
+        uses: actions/upload-artifact@v4
+        with:
+          name: eventreg-npa-legacy-2019-2021
+          path: output/*
+          retention-days: 7
+          compression-level: 6
