@@ -21,7 +21,7 @@ permissions:
 jobs:
   p1-micro-pilot:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@v4
 
@@ -40,16 +40,19 @@ jobs:
             pystac-client==0.9.0 \
             planetary-computer==1.0.0
 
-      - name: Run multi-year seasonal vegetation and multi-summer heat pilot
+      - name: Run multi-year seasonal vegetation and multi-summer heat pilot v2
         env:
           ECOSCAPE_P1_OUTPUT: ${{ github.workspace }}/research/ecoscape-green-quality/output
+          ECOSCAPE_P1_AREAS_CSV: ${{ github.workspace }}/research/ecoscape-green-quality/P1_MICRO_PILOT_AREAS.csv
+          ECOSCAPE_P1_YEAR_START: '2019'
+          ECOSCAPE_P1_YEAR_END: '2026'
           GDAL_HTTP_MAX_RETRY: '4'
           GDAL_HTTP_RETRY_DELAY: '2'
           CPL_VSIL_CURL_CACHE_SIZE: '20000000'
         run: |
-          python research/ecoscape-green-quality/p1_micro_pilot.py
+          python research/ecoscape-green-quality/p1_temporal_runner_v2.py
 
-      - name: Validate non-empty evidence
+      - name: Validate non-empty and sensor-complete evidence
         run: |
           python - <<'PY'
           import json
@@ -60,6 +63,7 @@ jobs:
           assert audit['pilotAreas'] == 6
           assert audit['sentinelSceneRows'] > 0
           assert audit['landsatSceneRows'] > 0
+          assert audit['landsatThermalAssetMissingErrors'] == 0
           assert audit['rankingEffect'] == 'none'
           assert audit['scoringEffect'] == 'none'
           PY
@@ -69,12 +73,13 @@ jobs:
           cd research/ecoscape-green-quality
           cp P1_MICRO_PILOT_AREAS.csv output/
           cp p1_micro_pilot.py output/
+          cp p1_temporal_runner_v2.py output/
           sha256sum output/* | sort > output/SHA256SUMS.txt
-          zip -r ECOSCAPE_GREEN_QUALITY_P1_MICRO_20260819.zip output
+          zip -r ECOSCAPE_GREEN_QUALITY_P1_MICRO_V2_20260819.zip output
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ecoscape-green-quality-p1-micro-20260819
-          path: research/ecoscape-green-quality/ECOSCAPE_GREEN_QUALITY_P1_MICRO_20260819.zip
+          name: ecoscape-green-quality-p1-micro-v2-20260819
+          path: research/ecoscape-green-quality/ECOSCAPE_GREEN_QUALITY_P1_MICRO_V2_20260819.zip
           if-no-files-found: error
           retention-days: 30
