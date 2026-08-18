@@ -7,6 +7,12 @@ on:
     paths:
       - .github/workflows/ecoscape-green-quality-p1.yml
       - research/ecoscape-green-quality/**
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/ecoscape-green-quality-p1.yml
+      - research/ecoscape-green-quality/**
   workflow_dispatch:
 
 permissions:
