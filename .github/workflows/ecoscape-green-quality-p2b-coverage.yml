@@ -1,0 +1,53 @@
+name: ECOSCAPE Green Quality P2B Street Imagery Coverage
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/ecoscape-green-quality-p2b-coverage.yml
+      - .github/scripts/ecoscape_p2b_kartaview_coverage.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kartaview-metadata-coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run public metadata-only coverage audit
+        run: python .github/scripts/ecoscape_p2b_kartaview_coverage.py
+
+      - name: Validate no image download and no score effect
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('p2b-kartaview-output/P2B_KARTAVIEW_COVERAGE_AUDIT.json')
+          a=json.loads(p.read_text())
+          print(json.dumps(a,indent=2,ensure_ascii=False))
+          assert a['pilotAreas']==30
+          assert a['actualImageDownloads']==0
+          assert a['actualSpendJPY']==0
+          assert a['rankingEffect']=='none'
+          assert a['scoringEffect']=='none'
+          assert sum(a['statusCounts'].values())==30
+          PY
+
+      - name: Add SHA-256 manifest
+        run: sha256sum p2b-kartaview-output/* | sort > p2b-kartaview-output/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ecoscape-green-quality-p2b-kartaview-coverage-20260819
+          path: p2b-kartaview-output
+          if-no-files-found: error
+          retention-days: 30
