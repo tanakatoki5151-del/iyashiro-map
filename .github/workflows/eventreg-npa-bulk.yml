@@ -7,6 +7,12 @@ on:
     paths:
       - 'scripts/eventreg_extract_npa_bulk.py'
       - '.github/workflows/eventreg-npa-bulk.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'scripts/eventreg_extract_npa_bulk.py'
+      - '.github/workflows/eventreg-npa-bulk.yml'
   workflow_dispatch:
 
 permissions:
