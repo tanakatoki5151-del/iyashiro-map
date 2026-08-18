@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "イヤシロ土地判定・NEXUS API",
-    "version": "2.3.0",
-    "description": "土地カルテ、NEXUS個人条件、町丁目の公開募集市場を別々に確認する読み取り専用APIです。"
+    "version": "2.4.0",
+    "description": "土地カルテ、NEXUS物件条件V3、内部募集サンプル、外部公式ベンチマークを別々に返す読み取り専用APIです。"
   },
   "paths": {
     "/api/lookup": {
@@ -39,28 +39,29 @@
     },
     "/api/nexus": {
       "get": {
-        "operationId": "assessPropertyPolicy",
-        "summary": "物件条件と町丁目の公開募集市場を分けて判定する",
+        "operationId": "assessPropertyPolicyV3",
+        "summary": "物件条件V3、市場サンプル、外部ベンチマークを分けて判定する",
+        "description": "Hard条件は月額固定費17万円以下、1〜3階、15㎡以上です。㎡単価は参考表示のみ。市場サンプルは地域相場の完成版ではありません。",
         "parameters": [
-          { "name": "total", "in": "query", "required": false, "description": "月額固定費合計", "schema": { "type": "number" } },
+          { "name": "total", "in": "query", "required": false, "description": "家賃と管理費などの月額固定費合計", "schema": { "type": "number" } },
           { "name": "area", "in": "query", "required": false, "description": "専有面積（㎡）", "schema": { "type": "number" } },
-          { "name": "floor", "in": "query", "required": false, "schema": { "type": "number" } },
-          { "name": "address", "in": "query", "required": false, "schema": { "type": "string" } },
-          { "name": "town", "in": "query", "required": false, "description": "町丁目。住所入力時は画面側で自動補完可能", "schema": { "type": "string" } },
+          { "name": "floor", "in": "query", "required": false, "description": "所在階。1、2、3が条件内", "schema": { "type": "number" } },
+          { "name": "address", "in": "query", "required": false, "description": "住所。町丁目内部サンプルの照合にも使用", "schema": { "type": "string" } },
+          { "name": "town", "in": "query", "required": false, "description": "町丁目。住所より優先", "schema": { "type": "string" } },
           { "name": "currentness", "in": "query", "required": false, "schema": { "type": "string", "enum": ["confirmed", "stale", "unknown"] } },
           { "name": "identity", "in": "query", "required": false, "schema": { "type": "string", "enum": ["exact", "partial", "unknown"] } }
         ],
         "responses": {
-          "200": { "description": "条件ゲート、単純市場中央値、次の確認事項" },
+          "200": { "description": "Hard条件、参考㎡単価、内部市場、外部公式ベンチマーク、次の確認事項" },
           "400": { "description": "入力形式が不正" }
         }
       },
       "post": {
-        "operationId": "assessPropertyPolicyJson",
-        "summary": "JSONで物件条件と町丁目市場を判定する",
+        "operationId": "assessPropertyPolicyV3Json",
+        "summary": "JSONで物件条件V3と市場文脈を判定する",
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
         "responses": {
-          "200": { "description": "条件ゲートと市場文脈" },
+          "200": { "description": "schemaVersion 1.3のNEXUS判定" },
           "400": { "description": "入力形式が不正" }
         }
       }

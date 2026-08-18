@@ -3,7 +3,7 @@ import townMarketV1 from "./town-market-v1";
 export type NexusMarketSampleQuality = "ROBUST" | "REVIEW" | "THIN";
 
 export type NexusTownMarketContext = {
-  schemaVersion: "1.0";
+  schemaVersion: "1.1";
   asOfJST: string;
   town: string;
   sampleCount: number;
@@ -44,39 +44,51 @@ export function normalizeTownKey(raw: string | null | undefined) {
   return value;
 }
 
+function findTownRow(raw: string) {
+  const normalized = normalizeTownKey(raw);
+  if (!normalized) return null;
+
+  const exact = townMarketV1.towns.find((candidate) => normalizeTownKey(candidate.key) === normalized);
+  if (exact) return exact;
+
+  const contained = townMarketV1.towns
+    .map((candidate) => ({ candidate, key: normalizeTownKey(candidate.key) }))
+    .filter(({ key }) => key && normalized.includes(key))
+    .sort((a, b) => b.key.length - a.key.length)[0];
+  return contained?.candidate ?? null;
+}
+
 function quality(row: TownRow): NexusMarketSampleQuality {
-  if (row.n >= 5 && row.uniqueBuildings >= 4) return "ROBUST";
-  if (row.n >= 3 && row.uniqueBuildings >= 2) return "REVIEW";
+  if (row.n >= 15 && row.uniqueBuildings >= 8) return "ROBUST";
+  if (row.n >= 5 && row.uniqueBuildings >= 3) return "REVIEW";
   return "THIN";
 }
 
 function comparisonLabel(differencePct: number) {
-  if (differencePct <= -0.15) return "町丁目の単純中央値よりかなり低い";
-  if (differencePct <= -0.05) return "町丁目の単純中央値よりやや低い";
-  if (differencePct < 0.05) return "町丁目の単純中央値付近";
-  if (differencePct < 0.15) return "町丁目の単純中央値よりやや高い";
-  return "町丁目の単純中央値よりかなり高い";
+  if (differencePct <= -0.15) return "内部サンプル中央値よりかなり低い";
+  if (differencePct <= -0.05) return "内部サンプル中央値よりやや低い";
+  if (differencePct < 0.05) return "内部サンプル中央値付近";
+  if (differencePct < 0.15) return "内部サンプル中央値よりやや高い";
+  return "内部サンプル中央値よりかなり高い";
 }
 
-export function findTownMarket(town: string | null | undefined, propertyTotalJPY: number | null): NexusTownMarketContext | null {
-  const key = normalizeTownKey(town);
-  if (!key) return null;
-
-  const row = townMarketV1.towns.find((candidate) => normalizeTownKey(candidate.key) === key);
+export function findTownMarket(townOrAddress: string | null | undefined, propertyTotalJPY: number | null): NexusTownMarketContext | null {
+  if (!townOrAddress) return null;
+  const row = findTownRow(townOrAddress);
   if (!row) return null;
 
   const differenceFromMedianJPY = propertyTotalJPY === null ? null : propertyTotalJPY - row.medianTotalJPY;
   const differenceFromMedianPct = differenceFromMedianJPY === null ? null : differenceFromMedianJPY / row.medianTotalJPY;
   const sampleQuality = quality(row);
   const warnings = [
-    "これは公開募集の単純中央値です。成約賃料、現在空室、正式Championモデルの個別予測ではありません。",
-    "広さ、築年、徒歩、間取り、階数を揃えた比較ではありません。最初の検算として使います。",
+    "NEXUS内部の公開募集サンプルです。成約賃料、現在空室、正式Championモデルの個別予測ではありません。",
+    "広さ、築年、徒歩、間取り、階数を完全には揃えていません。地域の違和感を見つける最初の検算です。",
   ];
   if (sampleQuality === "THIN") warnings.push("標本が薄いため、この町丁目だけで高い・安いを断定しません。");
-  if (sampleQuality === "REVIEW") warnings.push("一定の参考にはなりますが、建物構成の偏りを追加確認します。");
+  if (sampleQuality === "REVIEW") warnings.push("方向感には使えますが、追加掲載と外部公式統計で補強します。");
 
   return {
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     asOfJST: townMarketV1.asOfJST,
     town: row.key,
     sampleCount: row.n,
