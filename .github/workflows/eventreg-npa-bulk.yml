@@ -1,0 +1,34 @@
+name: EVENTREG NPA Bulk Extraction
+
+on:
+  push:
+    branches:
+      - eventreg-npa-bulk-20260818
+    paths:
+      - 'scripts/eventreg_extract_npa_bulk.py'
+      - '.github/workflows/eventreg-npa-bulk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download and filter NPA 2019-2024
+        run: python scripts/eventreg_extract_npa_bulk.py
+      - name: Show summary
+        run: cat eventreg_npa_bulk/EVENTREG_NPA_2019_2024_TOKYO_KANAGAWA_STAGE1_SUMMARY_v1.json
+      - name: Upload filtered shards
+        uses: actions/upload-artifact@v4
+        with:
+          name: eventreg-npa-2019-2024-tokyo-kanagawa-stage1
+          path: eventreg_npa_bulk/*
+          if-no-files-found: error
+          retention-days: 7
