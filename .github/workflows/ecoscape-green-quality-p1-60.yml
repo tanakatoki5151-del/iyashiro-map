@@ -1,9 +1,9 @@
 name: ECOSCAPE Green Quality P1 60-Area Temporal Pilot
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/ecoscape-green-quality-p1
+      - main
     paths:
       - .github/workflows/ecoscape-green-quality-p1-60.yml
       - research/ecoscape-green-quality/P1_PILOT_60_AREAS_MIN.csv
