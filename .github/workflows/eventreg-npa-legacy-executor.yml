@@ -6,12 +6,14 @@ on:
       - eventreg-npa-legacy-repair-20260818
     paths:
       - scripts/eventreg_extract_npa_legacy.py
+      - scripts/eventreg_extract_mhlw_2019_2024.py
       - .github/workflows/eventreg-npa-legacy-executor.yml
   pull_request:
     branches:
       - main
     paths:
       - scripts/eventreg_extract_npa_legacy.py
+      - scripts/eventreg_extract_mhlw_2019_2024.py
       - .github/workflows/eventreg-npa-legacy-executor.yml
   workflow_dispatch:
 
@@ -19,31 +21,58 @@ permissions:
   contents: read
 
 jobs:
-  harvest-official-fatal-corpus:
+  harvest-official-fatal-corpora:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Check out the triggering branch
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Compile collector
-        run: python -m py_compile scripts/eventreg_extract_npa_legacy.py
-      - name: Collect and normalize official fatal source corpus
+
+      - name: Install workbook parser
+        run: python -m pip install --disable-pip-version-check openpyxl==3.1.5
+
+      - name: Compile collectors
+        run: |
+          python -m py_compile scripts/eventreg_extract_npa_legacy.py
+          python -m py_compile scripts/eventreg_extract_mhlw_2019_2024.py
+
+      - name: Collect JNIOSH 1991-2018 fatal source corpus
         run: python scripts/eventreg_extract_npa_legacy.py
-      - name: Read back output
+
+      - name: Collect MHLW 2019-2024 fatal source corpus
+        run: python scripts/eventreg_extract_mhlw_2019_2024.py
+
+      - name: Read back outputs
         if: always()
         run: |
+          echo '=== JNIOSH ==='
           test -f output/SUMMARY.json && cat output/SUMMARY.json || true
           find output -maxdepth 2 -type f -printf '%p\t%s bytes\n' | sort || true
-      - name: Upload collected corpus
+          echo '=== MHLW ==='
+          test -f output_mhlw/SUMMARY.json && cat output_mhlw/SUMMARY.json || true
+          find output_mhlw -maxdepth 2 -type f -printf '%p\t%s bytes\n' | sort || true
+
+      - name: Upload JNIOSH corpus
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: eventreg-jniosh-fatal-bulk-1991-2018
           path: output/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
+
+      - name: Upload MHLW corpus
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eventreg-mhlw-fatal-bulk-2019-2024
+          path: output_mhlw/
           if-no-files-found: error
           retention-days: 30
           compression-level: 6
