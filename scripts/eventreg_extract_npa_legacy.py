@@ -1,3 +1,10 @@
+#!/usr/bin/env python3
+"""Acquire JNIOSH's official 1991-2018 fatal occupational accident CSV corpus.
+
+This runs only on the isolated EVENTREG executor branch. It creates a staging
+source corpus and discovery pointers. It never creates canonical events,
+100 m relations, scores, rankings, or automatic exclusions.
+"""
 from __future__ import annotations
 
 import csv
@@ -6,259 +13,327 @@ import hashlib
 import json
 import re
 import shutil
-import ssl
+import sys
+import time
 import urllib.request
+from collections import Counter
 from pathlib import Path
 
-YEARS = (2019, 2020, 2021)
+BASE = "https://www.jniosh.johas.go.jp/publication/houkoku/ROUSAIDB"
+YEARS = range(1991, 2019)
+EXPECTED = 44_537
 OUT = Path("output")
-RAW = Path("raw")
-OUT.mkdir(exist_ok=True)
-RAW.mkdir(exist_ok=True)
+RAW = OUT / "raw"
 
-TOKYO_WARDS = set(range(101, 124))
-YOKOHAMA_WARDS = set(range(101, 119))
-KAWASAKI_WARDS = set(range(131, 138))
-
-
-def normalize_header(value: str) -> str:
-    value = value.replace("\ufeff", "")
-    value = value.replace("（", "(").replace("）", ")")
-    return re.sub(r"[\s_　()・]", "", value).strip()
-
-
-def find_index(headers: list[str], *candidates: str) -> int:
-    normalized = [normalize_header(x) for x in headers]
-    for candidate in candidates:
-        needle = normalize_header(candidate)
-        for idx, value in enumerate(normalized):
-            if value == needle:
-                return idx
-    for candidate in candidates:
-        needle = normalize_header(candidate)
-        for idx, value in enumerate(normalized):
-            if needle and (needle in value or value in needle):
-                return idx
-    raise KeyError(f"header not found: {candidates}; headers={headers}")
+TOKYO = [
+    "千代田区", "中央区", "港区", "新宿区", "文京区", "台東区", "墨田区", "江東区",
+    "品川区", "目黒区", "大田区", "世田谷区", "渋谷区", "中野区", "杉並区", "豊島区",
+    "北区", "荒川区", "板橋区", "練馬区", "足立区", "葛飾区", "江戸川区",
+]
+YOKOHAMA = [
+    "鶴見区", "神奈川区", "西区", "中区", "南区", "港南区", "保土ケ谷区", "旭区",
+    "磯子区", "金沢区", "港北区", "緑区", "青葉区", "都筑区", "戸塚区", "栄区",
+    "泉区", "瀬谷区",
+]
+KAWASAKI = ["川崎区", "幸区", "中原区", "高津区", "宮前区", "多摩区", "麻生区"]
+AMBIGUOUS = {"中央区", "港区", "北区", "西区", "中区", "南区", "旭区", "緑区", "青葉区", "泉区"}
 
 
-def dms_to_decimal(value: str, longitude: bool = False) -> str:
-    digits = re.sub(r"\D", "", value or "")
-    expected = 10 if longitude else 9
-    if len(digits) != expected:
-        return ""
-    deg_len = 3 if longitude else 2
-    deg = int(digits[:deg_len])
-    minute = int(digits[deg_len : deg_len + 2])
-    sec_milli = int(digits[deg_len + 2 :])
-    decimal = deg + minute / 60 + (sec_milli / 1000) / 3600
-    return f"{decimal:.9f}"
-
-
-def is_target(pref: str, municipality: str) -> bool:
-    try:
-        p = int(pref)
-        m = int(municipality)
-    except ValueError:
-        return False
-    if p == 30 and m in TOKYO_WARDS:
-        return True
-    return p == 45 and (m in YOKOHAMA_WARDS or m in KAWASAKI_WARDS)
-
-
-def sha256(path: Path) -> str:
+def digest(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
     return h.hexdigest()
 
 
-def download(year: int) -> tuple[Path, str]:
-    candidates = [
-        f"https://www.npa.go.jp/publications/statistics/koutsuu/opendata/{year}/honhyo_{year}.csv",
-        f"https://xs489works.xsrv.jp/pmtiles-data/traffic-accident/data/honhyo_{year}.csv",
-    ]
-    dest = RAW / f"honhyo_{year}.csv"
-    last_error = None
-    for url in candidates:
-        try:
-            req = urllib.request.Request(
-                url, headers={"User-Agent": "Mozilla/5.0 EVENTREG research extractor"}
-            )
-            with urllib.request.urlopen(
-                req, timeout=180, context=ssl.create_default_context()
-            ) as response, dest.open("wb") as out:
-                shutil.copyfileobj(response, out, length=1024 * 1024)
-            if dest.stat().st_size < 1_000_000:
-                raise RuntimeError(f"download too small: {dest.stat().st_size}")
-            return dest, url
-        except Exception as exc:
-            last_error = repr(exc)
-            if dest.exists():
-                dest.unlink()
-    raise RuntimeError(f"all downloads failed for {year}: {last_error}")
-
-
-OUTPUT_FIELDS = [
-    "sourceYear",
-    "prefectureCode",
-    "municipalityCode",
-    "severityCode",
-    "fatalities",
-    "injuries",
-    "year",
-    "month",
-    "day",
-    "hour",
-    "minute",
-    "latitude",
-    "longitude",
-    "policeStationCode",
-    "accidentTypeCode",
-    "roadShapeCode",
-    "weatherCode",
-    "dayNightCode",
-    "sourceRow",
-]
-
-summaries = []
-for release_year in YEARS:
-    raw_path, source_url = download(release_year)
-    target_path = OUT / (
-        f"EVENTREG_NPA_{release_year}_TOKYO_KANAGAWA_"
-        "ALL_INJURY_LEGACY_REPAIRED_v1.csv.gz"
-    )
-    diagnostics_path = OUT / (
-        f"EVENTREG_NPA_{release_year}_LEGACY_SCHEMA_DIAGNOSTIC_v1.json"
-    )
-
-    with raw_path.open("r", encoding="cp932", errors="replace", newline="") as src:
-        reader = csv.reader(src)
-        headers = next(reader)
-        indices = {
-            "material": find_index(headers, "資料区分"),
-            "pref": find_index(headers, "都道府県コード"),
-            "station": find_index(headers, "警察署等コード"),
-            "ticket": find_index(headers, "本票番号"),
-            "severity": find_index(headers, "事故内容"),
-            "fatalities": find_index(headers, "死者数"),
-            "injuries": find_index(headers, "負傷者数"),
-            "municipality": find_index(headers, "市区町村コード"),
-            "year": find_index(headers, "発生日時年", "発生日時_年"),
-            "month": find_index(headers, "発生日時月", "発生日時_月"),
-            "day": find_index(headers, "発生日時日", "発生日時_日"),
-            "hour": find_index(headers, "発生日時時", "発生日時_時"),
-            "minute": find_index(headers, "発生日時分", "発生日時_分"),
-            "daynight": find_index(headers, "昼夜"),
-            "weather": find_index(headers, "天候"),
-            "roadshape": find_index(headers, "道路形状"),
-            "accidenttype": find_index(headers, "事故類型"),
-            "lat": find_index(headers, "地点緯度北緯", "地点_緯度北緯"),
-            "lon": find_index(headers, "地点経度東経", "地点_経度東経"),
-        }
-        nationwide = target = fatal = coordinates = 0
-        pref_counts: dict[str, int] = {}
-        with gzip.open(
-            target_path, "wt", encoding="utf-8", newline="", compresslevel=9
-        ) as dst:
-            writer = csv.DictWriter(dst, fieldnames=OUTPUT_FIELDS)
-            writer.writeheader()
-            for source_row, row in enumerate(reader, start=2):
-                if not row or len(row) <= max(indices.values()):
-                    continue
-                nationwide += 1
-                pref = row[indices["pref"]].strip()
-                municipality = row[indices["municipality"]].strip()
-                pref_counts[pref] = pref_counts.get(pref, 0) + 1
-                if not is_target(pref, municipality):
-                    continue
-                lat = dms_to_decimal(row[indices["lat"]], longitude=False)
-                lon = dms_to_decimal(row[indices["lon"]], longitude=True)
-                fatalities = row[indices["fatalities"]].strip()
-                writer.writerow(
-                    {
-                        "sourceYear": str(release_year),
-                        "prefectureCode": pref,
-                        "municipalityCode": municipality,
-                        "severityCode": row[indices["severity"]].strip(),
-                        "fatalities": fatalities,
-                        "injuries": row[indices["injuries"]].strip(),
-                        "year": row[indices["year"]].strip(),
-                        "month": row[indices["month"]].strip(),
-                        "day": row[indices["day"]].strip(),
-                        "hour": row[indices["hour"]].strip(),
-                        "minute": row[indices["minute"]].strip(),
-                        "latitude": lat,
-                        "longitude": lon,
-                        "policeStationCode": row[indices["station"]].strip(),
-                        "accidentTypeCode": row[indices["accidenttype"]].strip(),
-                        "roadShapeCode": row[indices["roadshape"]].strip(),
-                        "weatherCode": row[indices["weather"]].strip(),
-                        "dayNightCode": row[indices["daynight"]].strip(),
-                        "sourceRow": str(source_row),
-                    }
-                )
-                target += 1
-                if int(fatalities or "0") > 0:
-                    fatal += 1
-                if lat and lon:
-                    coordinates += 1
-
-    diagnostics = {
-        "sourceYear": release_year,
-        "sourceUrl": source_url,
-        "rawBytes": raw_path.stat().st_size,
-        "rawSha256": sha256(raw_path),
-        "headerCount": len(headers),
-        "headers": headers,
-        "indices": indices,
-        "nationwideRows": nationwide,
-        "target48Rows": target,
-        "fatalTarget48Rows": fatal,
-        "coordinateRows": coordinates,
-        "prefectureCounts": pref_counts,
-        "outputFile": target_path.name,
-        "outputBytes": target_path.stat().st_size,
-        "outputSha256": sha256(target_path),
+def download(url: str, path: Path) -> dict:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; EVENTREG-source-harvester/4.0; research)",
+        "Accept": "text/csv,text/plain,*/*",
+        "Accept-Language": "ja,en;q=0.8",
     }
-    diagnostics_path.write_text(
-        json.dumps(diagnostics, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    summaries.append(diagnostics)
-    print(
-        json.dumps(
-            {
-                key: diagnostics[key]
-                for key in (
-                    "sourceYear",
-                    "nationwideRows",
-                    "target48Rows",
-                    "fatalTarget48Rows",
-                    "coordinateRows",
-                )
-            },
-            ensure_ascii=False,
-        )
-    )
+    last = None
+    for attempt in range(1, 7):
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=180) as response, path.open("wb") as output:
+                shutil.copyfileobj(response, output, length=1024 * 1024)
+                meta = {
+                    "status": int(getattr(response, "status", 200)),
+                    "content_type": response.headers.get("Content-Type", ""),
+                    "bytes": path.stat().st_size,
+                    "attempts": attempt,
+                    "final_url": response.geturl(),
+                }
+            if path.stat().st_size < 100:
+                raise RuntimeError(f"download too small: {path.stat().st_size}")
+            return meta
+        except Exception as exc:
+            last = repr(exc)
+            path.unlink(missing_ok=True)
+            time.sleep(min(20, 2 ** attempt))
+    raise RuntimeError(f"download failed {url}: {last}")
 
-total = {
-    "buildId": "EVENTREG_NPA_2019_2021_LEGACY_REPAIR_v1",
-    "status": "COMPLETE" if all(x["target48Rows"] > 0 for x in summaries) else "FAIL",
-    "years": summaries,
-    "totals": {
-        "nationwideRows": sum(x["nationwideRows"] for x in summaries),
-        "target48Rows": sum(x["target48Rows"] for x in summaries),
-        "fatalTarget48Rows": sum(x["fatalTarget48Rows"] for x in summaries),
-        "coordinateRows": sum(x["coordinateRows"] for x in summaries),
-    },
-    "semantics": (
-        "Source extraction only. No score, rank, automatic exclusion or "
-        "verified-absence claim."
-    ),
-}
-(OUT / "EVENTREG_NPA_2019_2021_LEGACY_REPAIR_SUMMARY_v1.json").write_text(
-    json.dumps(total, ensure_ascii=False, indent=2), encoding="utf-8"
-)
-if total["status"] != "COMPLETE":
-    raise SystemExit("legacy repair produced empty target year")
+
+def read_csv(path: Path):
+    with path.open("r", encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames:
+            raise RuntimeError(f"missing header: {path}")
+        old = list(reader.fieldnames)
+        headers = [x.replace("\ufeff", "").strip() for x in old]
+        rows = []
+        for raw in reader:
+            rows.append({
+                new: ("" if raw.get(orig) is None else str(raw.get(orig)))
+                for orig, new in zip(old, headers)
+            })
+    return headers, rows
+
+
+def around(text: str, token: str, width: int = 35) -> str:
+    i = text.find(token)
+    return "" if i < 0 else text[max(0, i - width): i + len(token) + width]
+
+
+def unique(items):
+    seen, result = set(), []
+    for item in items:
+        key = item[:2]
+        if key not in seen:
+            seen.add(key)
+            result.append(item)
+    return result
+
+
+def classify(narrative: str):
+    text = re.sub(r"\s+", "", narrative or "")
+    strong, coarse, weak = [], [], []
+
+    for ward in TOKYO:
+        for token in (f"東京都{ward}", f"東京{ward}"):
+            if token in text:
+                strong.append(("東京23区", ward, around(text, token)))
+                break
+    for ward in YOKOHAMA:
+        token = f"横浜市{ward}"
+        if token in text:
+            strong.append(("横浜市", ward, around(text, token)))
+    for ward in KAWASAKI:
+        token = f"川崎市{ward}"
+        if token in text:
+            strong.append(("川崎市", ward, around(text, token)))
+
+    if "東京都" in text and not any(x[0] == "東京23区" for x in strong):
+        coarse.append(("東京23区", "東京都（区未確定）", around(text, "東京都")))
+    if "横浜市" in text and not any(x[0] == "横浜市" for x in strong):
+        coarse.append(("横浜市", "横浜市（区未確定）", around(text, "横浜市")))
+    if "川崎市" in text and not any(x[0] == "川崎市" for x in strong):
+        coarse.append(("川崎市", "川崎市（区未確定）", around(text, "川崎市")))
+
+    used = {x[1] for x in strong}
+    for region, wards in (("東京23区", TOKYO), ("横浜市", YOKOHAMA), ("川崎市", KAWASAKI)):
+        for ward in wards:
+            if ward in text and ward not in used:
+                weak.append((region, ward, around(text, ward)))
+
+    strong, coarse, weak = unique(strong), unique(coarse), unique(weak)
+    chosen = strong or coarse or weak
+    if not chosen:
+        return {
+            "target_candidate": "0",
+            "target_match_class": "NO_TARGET48_STRING",
+            "target_region_group": "",
+            "target_municipality_candidates": "",
+            "target_match_evidence": "",
+            "event_registry_eligibility": "SOURCE_CORPUS_ONLY",
+            "geometry_eligibility": "NO",
+            "privacy_gate": "ACTIVE",
+            "unknown_reason": "no explicit target48 place string",
+        }
+
+    if strong:
+        match_class, eligibility = "EXPLICIT_CITY_PREFECTURE_PLUS_WARD", "DISCOVERY_REVIEW"
+    elif coarse:
+        match_class, eligibility = "EXPLICIT_CITY_OR_PREFECTURE_ONLY", "HOLD_SUBMUNICIPAL_LOCATION"
+    else:
+        match_class = (
+            "AMBIGUOUS_WARD_ONLY"
+            if {x[1] for x in weak} & AMBIGUOUS
+            else "WARD_ONLY_WITHOUT_CITY_CONTEXT"
+        )
+        eligibility = "HOLD_CONTEXT_DISAMBIGUATION"
+
+    return {
+        "target_candidate": "1",
+        "target_match_class": match_class,
+        "target_region_group": "|".join(sorted({x[0] for x in chosen})),
+        "target_municipality_candidates": "|".join(x[1] for x in chosen),
+        "target_match_evidence": " || ".join(x[2] for x in chosen if x[2]),
+        "event_registry_eligibility": eligibility,
+        "geometry_eligibility": "NO_AUTOMATIC_100M_PROMOTION",
+        "privacy_gate": "ACTIVE",
+        "unknown_reason": "identity, exact place, dedup and geometry pending",
+    }
+
+
+def write_csv(path: Path, rows, fields, compressed: bool = False):
+    if compressed:
+        handle = gzip.open(path, "wt", encoding="utf-8", newline="", compresslevel=9)
+    else:
+        handle = path.open("w", encoding="utf-8", newline="")
+    with handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in fields})
+
+
+def main() -> int:
+    OUT.mkdir(exist_ok=True)
+    RAW.mkdir(parents=True, exist_ok=True)
+
+    rows_all, candidates, strong, manifest, errors = [], [], [], [], []
+    headers_all, seen_headers = [], set()
+    year_counts = Counter()
+    accident_types = Counter()
+    industries = Counter()
+    classes = Counter()
+
+    for year in YEARS:
+        name = f"SHIBO_{year}.csv"
+        url = f"{BASE}/{name}"
+        path = RAW / name
+        print(f"FETCH {year} {url}", flush=True)
+        try:
+            meta = download(url, path)
+            headers, rows = read_csv(path)
+        except Exception as exc:
+            errors.append({"year": year, "url": url, "error": repr(exc)})
+            print(f"ERROR {year}: {exc!r}", file=sys.stderr, flush=True)
+            continue
+
+        for header in headers:
+            if header not in seen_headers:
+                seen_headers.add(header)
+                headers_all.append(header)
+        year_counts[year] = len(rows)
+        manifest.append({
+            "year": year,
+            "source_file": name,
+            "source_url": url,
+            "final_url": meta["final_url"],
+            "http_status": meta["status"],
+            "content_type": meta["content_type"],
+            "bytes": meta["bytes"],
+            "sha256": digest(path),
+            "rows": len(rows),
+            "headers": " | ".join(headers),
+            "status": "ACQUIRED_AND_PARSED",
+            "canonical_events_added": 0,
+            "cell_relations_added": 0,
+        })
+
+        for row_number, source in enumerate(rows, 2):
+            match = classify(source.get("災害状況", ""))
+            source_id = source.get("ID", "")
+            record = {
+                "source_dataset": "JNIOSH_FATAL_OCCUPATIONAL_CORRECTED_CSV_1991_2018",
+                "source_file": name,
+                "source_url": url,
+                "source_year": year,
+                "source_row_number": row_number,
+                "source_record_id": source_id,
+                "canonical_source_identity": f"JNIOSH_SHIBO_{year}_{source_id or row_number}",
+            }
+            record.update(source)
+            record.update(match)
+            rows_all.append(record)
+            accident_types[source.get("事故の型分類名", "") or "(blank)"] += 1
+            industries[source.get("業種（大分類）分類名", "") or "(blank)"] += 1
+            if match["target_candidate"] == "1":
+                candidates.append(record)
+                classes[match["target_match_class"]] += 1
+                if match["target_match_class"] == "EXPLICIT_CITY_PREFECTURE_PLUS_WARD":
+                    strong.append(record)
+
+    metadata_fields = [
+        "source_dataset", "source_file", "source_url", "source_year", "source_row_number",
+        "source_record_id", "canonical_source_identity",
+    ]
+    gate_fields = [
+        "target_candidate", "target_match_class", "target_region_group",
+        "target_municipality_candidates", "target_match_evidence",
+        "event_registry_eligibility", "geometry_eligibility", "privacy_gate", "unknown_reason",
+    ]
+    fields = metadata_fields + headers_all + gate_fields
+
+    write_csv(OUT / "JNIOSH_FATAL_OCCUPATIONAL_1991_2018_ALL.csv.gz", rows_all, fields, True)
+    write_csv(OUT / "TARGET48_DISCOVERY_CANDIDATES.csv", candidates, fields)
+    write_csv(OUT / "TARGET48_STRONG_STRING_MATCHES.csv", strong, fields)
+    write_csv(
+        OUT / "SOURCE_FILE_MANIFEST.csv",
+        manifest,
+        [
+            "year", "source_file", "source_url", "final_url", "http_status", "content_type",
+            "bytes", "sha256", "rows", "headers", "status",
+            "canonical_events_added", "cell_relations_added",
+        ],
+    )
+    write_csv(
+        OUT / "YEAR_COUNTS.csv",
+        [{"year": key, "records": value} for key, value in sorted(year_counts.items())],
+        ["year", "records"],
+    )
+    write_csv(
+        OUT / "ACCIDENT_TYPE_SUMMARY.csv",
+        [{"accident_type": key, "records": value} for key, value in accident_types.most_common()],
+        ["accident_type", "records"],
+    )
+    write_csv(
+        OUT / "INDUSTRY_SUMMARY.csv",
+        [{"industry": key, "records": value} for key, value in industries.most_common()],
+        ["industry", "records"],
+    )
+    shutil.make_archive(str(OUT / "JNIOSH_RAW_28_FILES"), "zip", RAW)
+
+    summary = {
+        "run_id": "eventreg-jniosh-44537-20260819-v4",
+        "official_source": "JNIOSH corrected fatal occupational accident CSV corpus",
+        "coverage": "1991-2018",
+        "expected_files": 28,
+        "acquired_files": len(manifest),
+        "expected_records": EXPECTED,
+        "acquired_records": len(rows_all),
+        "official_count_match": len(manifest) == 28 and len(rows_all) == EXPECTED and not errors,
+        "target48_discovery_candidates": len(candidates),
+        "target48_strong_string_matches": len(strong),
+        "target_match_classes": dict(classes),
+        "errors": errors,
+        "contracts": {
+            "canonical_events_added": 0,
+            "cell_relations_added": 0,
+            "score_rank_exclusion_effect": 0,
+            "privacy_gate": "ACTIVE",
+            "no_automatic_100m_promotion": True,
+            "unknown_is_not_absence": True,
+        },
+    }
+    (OUT / "SUMMARY.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    (OUT / "README.md").write_text(
+        "# EVENTREG fatal bulk corpus\n\n"
+        f"Acquired **{len(rows_all):,}** official source rows from **{len(manifest)}/28** annual files. "
+        f"Target48 discovery candidates: **{len(candidates):,}**. "
+        "Canonical events/cell relations added: **0/0**.\n",
+        encoding="utf-8",
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
+    return 1 if not rows_all else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
