@@ -1,0 +1,47 @@
+name: VEIL Sumida Park Probe
+
+on:
+  push:
+    branches:
+      - project-veil-address-core-v1
+    paths:
+      - 'iyashiro-map-github-vercel/veil/tools/probe-sumida-park.py'
+      - '.github/workflows/veil-sumida-park-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  official-park-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: iyashiro-map-github-vercel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install probe dependency
+        run: python -m pip install --disable-pip-version-check pyshp==2.3.1
+
+      - name: Acquire and inspect Sumida official park SHP
+        run: python veil/tools/probe-sumida-park.py
+        env:
+          VEIL_SUMIDA_PARK_OUT: veil-sumida-park-probe
+
+      - name: Upload raw and compact report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veil-sumida-park-probe
+          path: |
+            iyashiro-map-github-vercel/veil-sumida-park-probe/kuritukouen_20251001.zip
+            iyashiro-map-github-vercel/veil-sumida-park-probe/sumida-park-probe.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Fail closed if report missing
+        if: always()
+        run: test -s veil-sumida-park-probe/sumida-park-probe.json

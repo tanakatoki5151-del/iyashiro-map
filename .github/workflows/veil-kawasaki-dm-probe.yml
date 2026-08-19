@@ -1,0 +1,58 @@
+name: VEIL Kawasaki DM Probe
+
+on:
+  push:
+    branches:
+      - project-veil-address-core-v1
+    paths:
+      - 'iyashiro-map-github-vercel/veil/tools/probe-kawasaki-dm.py'
+      - '.github/workflows/veil-kawasaki-dm-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  primary-dm-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: iyashiro-map-github-vercel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download and probe Kawasaki official DM archives
+        run: python veil/tools/probe-kawasaki-dm.py
+        env:
+          VEIL_DM_PROBE_OUT: veil-kawasaki-dm-probe
+
+      - name: Upload raw DM archives and compact report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veil-kawasaki-dm-probe-bundle
+          path: |
+            iyashiro-map-github-vercel/veil-kawasaki-dm-probe/DM1.zip
+            iyashiro-map-github-vercel/veil-kawasaki-dm-probe/DM2.zip
+            iyashiro-map-github-vercel/veil-kawasaki-dm-probe/kawasaki-dm-probe.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Fail closed if primary DM acquisition failed
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+          p = pathlib.Path('veil-kawasaki-dm-probe/kawasaki-dm-probe.json')
+          if not p.exists():
+              print('VEIL_DM_PROBE_FAIL=report missing')
+              sys.exit(1)
+          d = json.loads(p.read_text(encoding='utf-8'))
+          bad = [x.get('resourceKey') for x in d.get('targets', []) if x.get('status') != 'ACQUIRED']
+          if len(d.get('targets', [])) != 2 or bad:
+              print('VEIL_DM_PROBE_FAIL=' + repr(bad))
+              sys.exit(1)
+          print('VEIL_DM_ACQUISITION=PASS')
+          PY

@@ -1,0 +1,62 @@
+name: VEIL Yokohama Kamoi Old-New PDF Probe
+
+on:
+  push:
+    branches:
+      - project-veil-address-core-v1
+    paths:
+      - '.github/workflows/veil-yokohama-kamoi-oldnew-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PDF tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
+      - name: Fetch and render target pages from official Yokohama table PDF
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p report renders
+          URL='https://www.city.yokohama.lg.jp/kurashi/koseki-zei-hoken/todokede/jukyo/jisshi/20200131115946832.files/0165_20200110.pdf'
+          curl --fail --location --retry 3 --retry-delay 2 "$URL" -o kamoi.pdf
+          sha256sum kamoi.pdf > report/pdf-sha256.txt
+          pdfinfo kamoi.pdf > report/pdfinfo.txt
+          pdftotext -layout kamoi.pdf report/full.txt
+          # p12 is visually confirmed section divider: 1.旧新対照の部.
+          # Therefore render preceding new-to-old table pages 3-11 at high resolution.
+          for p in $(seq 3 11); do
+            pdftoppm -f "$p" -l "$p" -png -r 220 kamoi.pdf "renders/pdfpage-${p}" >/dev/null 2>&1
+          done
+          python - <<'PY'
+          import json, pathlib
+          renders=sorted(pathlib.Path('renders').glob('*.png'))
+          report={
+            'schemaVersion':'VEIL_KAMOI_OLDNEW_PDF_PROBE_v3',
+            'sourceUrl':'https://www.city.yokohama.lg.jp/kurashi/koseki-zei-hoken/todokede/jukyo/jisshi/20200131115946832.files/0165_20200110.pdf',
+            'textLayerNonempty':bool(pathlib.Path('report/full.txt').read_text(errors='replace').strip()),
+            'visuallyConfirmedSectionDivider':'PDF page 12 = 1.旧新対照の部',
+            'highResRenderedPages':list(range(3,12)),
+            'renderCount':len(renders),
+            'target':'find historical new address 鴨居七丁目32番 and its old-address crosswalk',
+            'promotionGuard':'Historical address table content does not establish current physical-feature geometry.'
+          }
+          pathlib.Path('report/probe.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+          if len(renders)!=9: raise SystemExit(2)
+          PY
+      - name: Upload PDF probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veil-kamoi-oldnew-pdf-probe
+          path: |
+            report/
+            renders/
+          if-no-files-found: error
+          retention-days: 14

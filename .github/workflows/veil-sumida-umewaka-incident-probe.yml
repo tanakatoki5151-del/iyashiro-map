@@ -1,0 +1,49 @@
+name: VEIL Sumida Umewaka Incident Probe
+
+on:
+  push:
+    branches:
+      - project-veil-address-core-v1
+    paths:
+      - 'iyashiro-map-github-vercel/veil/tools/probe-sumida-umewaka-incident.py'
+      - '.github/workflows/veil-sumida-umewaka-incident-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  official-incident-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: iyashiro-map-github-vercel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install PDF parser
+        run: python -m pip install --disable-pip-version-check pypdf==6.0.0
+      - name: Probe official Sumida notice
+        run: python veil/tools/probe-sumida-umewaka-incident.py
+        env:
+          VEIL_UMEWAKA_INCIDENT_OUT: veil-umewaka-incident-probe
+      - name: Upload privacy-safe probe report and raw only if acquired
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veil-sumida-umewaka-incident-evidence
+          path: |
+            iyashiro-map-github-vercel/veil-umewaka-incident-probe/sumida-umewaka-incident-probe.json
+            iyashiro-map-github-vercel/veil-umewaka-incident-probe/20251125_ko464_s.pdf
+          if-no-files-found: error
+          retention-days: 14
+      - name: Validate probe report exists
+        if: always()
+        run: |
+          test -s veil-umewaka-incident-probe/sumida-umewaka-incident-probe.json
+          python - <<'PY'
+          import json
+          d=json.load(open('veil-umewaka-incident-probe/sumida-umewaka-incident-probe.json'))
+          print('VEIL_INCIDENT_SOURCE_GATE='+d.get('sourceGateStatus','UNKNOWN'))
+          PY

@@ -1,0 +1,31 @@
+name: VEIL Address Core CI
+
+on:
+  push:
+    branches:
+      - project-veil-address-core-v1
+    paths:
+      - 'iyashiro-map-github-vercel/veil/**'
+      - '.github/workflows/veil-address-core-ci.yml'
+  pull_request:
+    paths:
+      - 'iyashiro-map-github-vercel/veil/**'
+      - '.github/workflows/veil-address-core-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  veil-unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run isolated VEIL tests
+        working-directory: iyashiro-map-github-vercel
+        run: node --test veil/*.test.mjs

@@ -1,0 +1,85 @@
+name: VEIL Nichibunken 48 Broad Run
+
+on:
+  push:
+    branches:
+      - project-veil-address-core-v1
+    paths:
+      - 'iyashiro-map-github-vercel/veil/tools/nichibunken-48-broad-run.mjs'
+      - '.github/workflows/veil-nichibunken-48-broad-run.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recall-only-broad-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: iyashiro-map-github-vercel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run 48-municipality recall-only search
+        run: node veil/tools/nichibunken-48-broad-run.mjs
+        env:
+          VEIL_NICHIBUNKEN_OUT: veil-nichibunken-out
+
+      - name: Upload compact reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veil-nichibunken-48-reports
+          path: iyashiro-map-github-vercel/veil-nichibunken-out/reports/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload raw recall pages
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veil-nichibunken-48-raw-pages
+          path: iyashiro-map-github-vercel/veil-nichibunken-out/raw/
+          if-no-files-found: warn
+          compression-level: 6
+          retention-days: 14
+
+      - name: Fail closed on query or parse errors
+        if: always()
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const p = 'veil-nichibunken-out/reports/nichibunken-48-summary.json';
+          if (!fs.existsSync(p)) {
+            console.error('summary missing');
+            process.exit(1);
+          }
+          const s = JSON.parse(fs.readFileSync(p, 'utf8'));
+          const all = s.results?.allQueries;
+          const simple = s.results?.byQueryType?.F1_SIMPLE_CURRENT_MUNICIPALITY_RECALL_ONLY;
+          const contextual = s.results?.byQueryType?.F1_CONTEXTUAL_CURRENT_MUNICIPALITY_RECALL_ONLY;
+          const problems = [];
+          if (!all || all.queries !== 96 || all.acquired !== 96 || all.queryErrors !== 0) {
+            problems.push(`allQueries=${JSON.stringify(all)}`);
+          }
+          if (!simple || simple.queries !== 48 || simple.acquired !== 48 || simple.queryErrors !== 0) {
+            problems.push(`simple=${JSON.stringify(simple)}`);
+          }
+          if (!contextual || contextual.queries !== 48 || contextual.acquired !== 48 || contextual.queryErrors !== 0) {
+            problems.push(`contextual=${JSON.stringify(contextual)}`);
+          }
+          if (problems.length) {
+            console.error('VEIL_NICHIBUNKEN_FAIL_CLOSED=' + JSON.stringify(problems));
+            process.exit(1);
+          }
+          console.log('VEIL_NICHIBUNKEN_GATE=PASS');
+          console.log('VEIL_NICHIBUNKEN_RESULTS=' + JSON.stringify(s.results));
+          NODE
