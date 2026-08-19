@@ -1,0 +1,38 @@
+{
+  "workflow_run_id": 32248932551,
+  "workflow_run_attempt": 1,
+  "workflow_name": "EVENTREG official fatal bulk executor",
+  "head_sha": "8f9c3e79e3aa11a9738cdc3aac7bb1bf6b8300bf",
+  "artifact_name": "eventreg-mhlw-fatal-bulk-2019-2024",
+  "summary": {
+    "run_id": "eventreg-mhlw-fatal-occupational-2019-2024-20260819-v1",
+    "official_source": "MHLW workplace safety fatal accident annual workbooks",
+    "coverage": "2019-2024",
+    "expected_files": 6,
+    "acquired_files": 6,
+    "acquired_source_rows": 4795,
+    "exact_duplicate_rows": 3,
+    "unique_source_fingerprints": 4792,
+    "target48_discovery_candidates": 0,
+    "target48_strong_string_matches": 0,
+    "target_match_classes": {},
+    "year_counts": {
+      "2019": 846,
+      "2020": 803,
+      "2021": 868,
+      "2022": 775,
+      "2023": 756,
+      "2024": 747
+    },
+    "errors": [],
+    "complete": true,
+    "contracts": {
+      "canonical_events_added": 0,
+      "cell_relations_added": 0,
+      "score_rank_exclusion_effect": 0,
+      "privacy_gate": "ACTIVE",
+      "no_automatic_100m_promotion": true,
+      "unknown_is_not_absence": true
+    }
+  }
+}
