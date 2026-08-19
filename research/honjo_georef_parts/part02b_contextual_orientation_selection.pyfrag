@@ -1,0 +1,202 @@
+# Context-supported orientation selection.
+# The secondary photograph captures an official museum exhibit panel stating that
+# the former depot site includes the present park, Ryogoku Junior High School,
+# Dai-ichi Hotel Ryogoku and part of the Edo-Tokyo Museum.  The panel is used as
+# qualitative orientation context only, never as an exact cadastral boundary.
+_PRE_CONTEXT_ORIENTATION_BUILD = build_constraint_and_fit
+
+
+def _candidate_orientation_rows(modern_projected: dict[str, Any]) -> list[dict[str, Any]]:
+    source_large = Polygon([(x, -y) for x, y in P83_A_COMPONENTS["park_block_large"]])
+    source_outer = Polygon([(x, -y) for x, y in P83_OUTER_PIXELS])
+    src = directional_extremes(source_large, 16)
+    park_target = modern_projected["park"].convex_hull
+    dst_base = directional_extremes(park_target, 16)
+    rows: list[dict[str, Any]] = []
+    for reversed_order in (False, True):
+        dst0 = dst_base[::-1] if reversed_order else dst_base
+        for shift in range(16):
+            dst = np.roll(dst0, shift, axis=0)
+            try:
+                matrix, rms = fit_affine(src, dst)
+                large = affinity.affine_transform(source_large, matrix.tolist())
+                outer = affinity.affine_transform(source_outer, matrix.tolist())
+                park_union = large.union(park_target).area
+                park_iou = float(large.intersection(park_target).area / park_union) if park_union else 0.0
+                park_hausdorff = float(large.hausdorff_distance(park_target))
+                area_ratio = float(outer.area / SOURCE_AREA_M2_APPROX)
+                coverage = {
+                    role: float(outer.intersection(geom).area / geom.area) if geom.area else 0.0
+                    for role, geom in modern_projected.items()
+                }
+                distance = {role: float(outer.distance(geom)) for role, geom in modern_projected.items()}
+                gates = {
+                    "parkShapeFit": park_iou >= 0.65 and park_hausdorff <= 120.0,
+                    "outerArea": 0.80 <= area_ratio <= 1.20,
+                    "parkCoverage": coverage.get("park", 0.0) >= 0.75,
+                    "schoolCoverage": coverage.get("school", 0.0) >= 0.50,
+                    "hotelCoverage": coverage.get("hotel", 0.0) >= 0.10,
+                    "museumProximity": distance.get("museum", float("inf")) <= 30.0,
+                }
+                objective = float(
+                    (1.0 - park_iou) * 100.0
+                    + rms
+                    + park_hausdorff * 0.25
+                    + abs(area_ratio - 1.0) * 100.0
+                    + (1.0 - coverage.get("school", 0.0)) * 25.0
+                    + (1.0 - coverage.get("hotel", 0.0)) * 25.0
+                    + distance.get("museum", 9999.0) * 0.10
+                )
+                rows.append({
+                    "reversed": reversed_order,
+                    "shift": shift,
+                    "matrix": matrix,
+                    "large": large,
+                    "outer": outer,
+                    "rmsM": float(rms),
+                    "parkIoU": park_iou,
+                    "parkHausdorffM": park_hausdorff,
+                    "outerAreaM2": float(outer.area),
+                    "outerAreaRatio": area_ratio,
+                    "coverage": coverage,
+                    "distanceM": distance,
+                    "gates": gates,
+                    "eligible": all(gates.values()),
+                    "objective": objective,
+                })
+            except Exception as exc:  # noqa: BLE001
+                rows.append({
+                    "reversed": reversed_order,
+                    "shift": shift,
+                    "eligible": False,
+                    "error": f"{type(exc).__name__}: {exc}",
+                })
+    return rows
+
+
+def build_constraint_and_fit(modern: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    features, audit = _PRE_CONTEXT_ORIENTATION_BUILD(modern)
+    projected = {k: project_geom(v) for k, v in modern.items()}
+    required = {"park", "hotel", "school", "museum"}
+    roles_complete = required.issubset(projected)
+    parcel_ok = (audit.get("parcelConsistency") or {}).get("relativeShareDifference", 1.0) <= 0.01
+
+    if not roles_complete:
+        audit["status"] = "research_shape_alignment_context_geometry_incomplete"
+        audit["contextualOrientationSelection"] = {
+            "status": "not_run",
+            "requiredRoles": sorted(required),
+            "availableRoles": sorted(projected),
+            "officialExhibitContext": "present park, school, hotel and part of museum",
+        }
+        for feature in features:
+            props = feature.setdefault("properties", {})
+            if str(props.get("featureRole", "")).startswith("p83_"):
+                props["status"] = "research_shape_alignment_context_geometry_incomplete"
+        return features, audit
+
+    rows = _candidate_orientation_rows(projected)
+    eligible = [row for row in rows if row.get("eligible") and parcel_ok]
+    serialisable_rows = []
+    for row in rows:
+        serialisable_rows.append({
+            k: v for k, v in row.items()
+            if k not in {"matrix", "large", "outer"}
+        })
+
+    audit["contextualOrientationSelection"] = {
+        "status": "selected" if eligible else "no_candidate_passed",
+        "method": "enumerate 16 directional shifts x reflected/non-reflected; apply official exhibit context gates",
+        "officialExhibitContext": "present park, Ryogoku Junior High School, Dai-ichi Hotel Ryogoku and part of Edo-Tokyo Museum",
+        "contextSourceRole": "secondary photograph of an official exhibit panel; qualitative orientation only",
+        "candidateCount": len(rows),
+        "eligibleCandidateCount": len(eligible),
+        "parcelRatioConsistencyPassed": parcel_ok,
+        "candidates": serialisable_rows,
+    }
+
+    # Remove the park-only orientation emitted by the preceding stage.  It remains
+    # reproducible in the candidate audit, but is not emitted as the current result.
+    features = [
+        f for f in features
+        if not str((f.get("properties") or {}).get("featureRole", "")).startswith("p83_")
+    ]
+
+    if not eligible:
+        audit["status"] = "research_shape_alignment_context_gate_failed"
+        audit.setdefault("promotionBlockedBy", []).append("a unique orientation satisfying the official exhibit context")
+        return features, audit
+
+    eligible.sort(key=lambda row: row["objective"])
+    selected = eligible[0]
+    matrix = selected["matrix"]
+    source_small = {
+        name: Polygon([(x, -y) for x, y in points])
+        for name, points in P83_A_COMPONENTS.items()
+        if name != "park_block_large"
+    }
+    transformed_small = {
+        name: affinity.affine_transform(poly, matrix.tolist())
+        for name, poly in source_small.items()
+    }
+    status = "research_shape_alignment_context_supported_v1"
+
+    audit.update({
+        "status": status,
+        "alignmentMethodClass": "context_supported_shape_alignment_not_control_point_georeference",
+        "directionalShift": int(selected["shift"]),
+        "directionalOrderReversed": bool(selected["reversed"]),
+        "shapeFitRmsM": selected["rmsM"],
+        "shapeFitHausdorffM": selected["parkHausdorffM"],
+        "shapeFitIoU": selected["parkIoU"],
+        "transformedLargeAAreaM2": float(selected["large"].area),
+        "transformedLargeAToOfficialParkAreaRatio": float(selected["large"].area / CURRENT_PARK_OFFICIAL_M2),
+        "transformedOuterAreaM2": selected["outerAreaM2"],
+        "transformedOuterToPublishedFormerDepotAreaRatio": selected["outerAreaRatio"],
+        "modernFeatureCoverageByTransformedOuter": selected["coverage"],
+        "modernFeatureDistanceFromTransformedOuterM": selected["distanceM"],
+        "candidateGate": {
+            **selected["gates"],
+            "parcelRatioConsistency": parcel_ok,
+            "uniqueEligibleOrientation": len(eligible) == 1,
+        },
+        "affineMatrixShapely": matrix.tolist(),
+        "contextualOrientationObjective": selected["objective"],
+        "shapeFitWarning": (
+            "The selected orientation is uniquely consistent with the qualitative official exhibit context, "
+            "but it still uses shape supports rather than historical-to-modern control points."
+        ),
+    })
+    audit["promotionBlockedBy"] = [
+        "six or more independent historical-to-modern control points",
+        "pre-redevelopment road, parcel or land-readjustment map",
+        "exact current museum-site parcel rather than building footprint/proxy",
+        "independent vertex and residual review",
+    ]
+
+    geometries = [
+        ("p83_large_A_context_supported_shape_alignment_v1", selected["large"]),
+        ("p83_former_depot_outer_context_supported_shape_alignment_v1", selected["outer"]),
+        *[(f"p83_{name}_context_supported_shape_alignment_v1", geom) for name, geom in transformed_small.items()],
+    ]
+    for role, geom in geometries:
+        features.append({
+            "type": "Feature",
+            "geometry": mapping(unproject_geom(geom)),
+            "properties": {
+                "featureRole": role,
+                "status": status,
+                "alignmentMethodClass": "context_supported_shape_alignment_not_control_point_georeference",
+                "scoringEffect": "none",
+                "verifiedHistoricalSitePolygonCountEffect": 0,
+                "sourceBackedReviewPolygonCountEffect": 0,
+                "doNotAutoExclude": True,
+                "doNotApplyDistancePenalty": True,
+                "doNotChangeRanking": True,
+                "notHistoricalBoundary": True,
+                "officialExhibitContextUsedQualitatively": True,
+            },
+        })
+    return features, audit
+
+

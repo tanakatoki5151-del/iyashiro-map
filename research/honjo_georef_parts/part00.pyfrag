@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+"""Evidence-first research pack for the former Honjo Army Clothing Depot.
+
+This script intentionally fails closed.  It may create an exploratory geometric
+fit and modern-feature constraint envelope, but it never creates a verified
+historical boundary and never changes scores or rankings.
+"""
+from __future__ import annotations
+
+import csv
+import hashlib
+import io
+import json
+import math
+import os
+import re
+import shutil
+import sys
+import time
+import zipfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Iterable
+
+import cv2
+import fitz  # PyMuPDF
+import geopandas as gpd
+import matplotlib.pyplot as plt
+import numpy as np
+import requests
+from PIL import Image, ImageDraw
+from pyproj import Transformer
+from shapely import affinity
+from shapely.geometry import GeometryCollection, MultiPolygon, Point, Polygon, mapping, shape
+from shapely.ops import transform as shp_transform, unary_union
+
+try:
+    import osm2geojson
+except Exception:  # pragma: no cover - the workflow installs it
+    osm2geojson = None
+
+OUT = Path(os.environ.get("HONJO_OUT", "out-honjo-georef"))
+RAW = OUT / "raw"
+DERIVED = OUT / "derived"
+QC = OUT / "qc"
+for directory in (OUT, RAW, DERIVED, QC):
+    directory.mkdir(parents=True, exist_ok=True)
+
+USER_AGENT = "iyashiro-map-honjo-research/1.0 (evidence-first; contact via repository)"
+SESSION = requests.Session()
+SESSION.headers.update({"User-Agent": USER_AGENT, "Accept-Language": "ja,en;q=0.8"})
+
+SOURCE_AREA_TSUBO_APPROX = 20430.0
+M2_PER_TSUBO = 3.3057851239669422
+SOURCE_AREA_M2_APPROX = SOURCE_AREA_TSUBO_APPROX * M2_PER_TSUBO
+PARK_1922_TSUBO = 6279.06
+PARK_1928_TSUBO = 5922.81
+PARK_1922_M2 = PARK_1922_TSUBO * M2_PER_TSUBO
+PARK_1928_M2 = PARK_1928_TSUBO * M2_PER_TSUBO
+CURRENT_PARK_OFFICIAL_M2 = 19579.53
+
+SOURCES = {
+    "p83_drive": "https://drive.usercontent.google.com/download?id=1Pw5i4kGHUFvd6-ZM6pYsVCdKUsa_aQZc&export=download&confirm=t",
+    "official_archive_page": "https://tokyoireikyoukai.or.jp/museum/archive/hifukusyouseki.html",
+    "official_2020_design_evolution": "https://tokyoireikyoukai.or.jp/news/images/20200821_04.jpg",
+    "official_2020_honjo_storehouse": "https://tokyoireikyoukai.or.jp/news/images/20200821_03.jpg",
+    "official_park_map_pdf": "https://tokyoireikyoukai.or.jp/location/doc/yokoamipark.pdf",
+    "secondary_exhibit_panel": "https://trip.painfo.net/wp-content/uploads/2020/01/img_4325.jpg",
+    "tokyo_green_ckan": "https://catalog.data.metro.tokyo.lg.jp/api/3/action/package_show?id=t000008d2000000024",
+    "tokyo_green_dataset": "https://catalog.data.metro.tokyo.lg.jp/dataset/t000008d2000000024",
+}
+
+LEGEND = {
+    "A": "公園用地",
+    "B": "社会事業用地",
+    "C": "道路用地",
+    "D": "逓信省用地",
+    "E": "学校用地",
+    "F": "電気局用地",
+}
+
+# Manually digitised from the official 1932 p83 plan after a +90 degree rotation.
+# Pixel coordinates are intentionally retained as source-space geometry.
+P83_OUTER_PIXELS = [
+    (240, 594), (238, 535), (264, 456), (293, 372), (325, 278),
+    (360, 181), (421, 79), (520, 127), (620, 178), (718, 230),
+    (743, 154), (751, 146), (771, 147), (803, 160), (843, 181),
+    (884, 210), (923, 247), (960, 289), (993, 336), (1024, 386),
+    (1052, 436), (1074, 481), (1092, 522), (1105, 549), (1092, 585),
+    (1015, 594), (910, 596), (805, 596), (700, 596), (595, 596),
+    (490, 596), (385, 596), (300, 596), (240, 594),
+]
+
+# Source-space parcel outlines manually digitised from the same p83 plan.
+# These coordinates are research linework only.  The published 1922 and 1928
+# area values were used as a QC check, so the ratio agreement is an internal
+# consistency check, not independent evidence.
+P83_A_COMPONENTS = {
+    "park_block_large": [
+        (803, 160), (843, 181), (884, 210), (923, 247), (960, 289),
+        (993, 336), (1024, 386), (1052, 436), (1066, 480), (1037, 510),
+        (950, 510), (950, 596), (900, 596), (900, 570), (748, 570),
+        (748, 596), (686, 596), (694, 560), (708, 510), (722, 460),
+        (736, 410), (750, 360), (763, 310), (776, 260), (790, 210),
+        (803, 160),
+    ],
+    "small_north": [(742, 145), (790, 166), (755, 252), (709, 229), (742, 145)],
+    "small_south": [(610, 572), (655, 572), (646, 596), (610, 596), (610, 572)],
+}
+
+P83_LABEL_POINTS = {
+    "A_large": (848, 399),
+    "A_small_north": (750, 195),
+    "A_small_south": (622, 584),
+    "B_west": (505, 585),
+    "B_east": (820, 585),
+    "C_diagonal": (576, 355),
+    "C_north_south": (752, 290),
+    "D_central": (612, 260),
+    "D_southeast": (1008, 553),
+    "E_central": (585, 430),
+    "E_southwest": (465, 500),
+    "F_west": (388, 295),
+}
+
+@dataclass
+class SourceRecord:
+    source_id: str
+    url: str
+    path: str | None
+    status: str
+    bytes: int | None = None
+    sha256: str | None = None
+    content_type: str | None = None
+    note: str | None = None
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def download(source_id: str, url: str, filename: str, *, min_bytes: int = 100) -> SourceRecord:
+    dest = RAW / filename
+    last_error: str | None = None
+    for attempt in range(4):
+        try:
+            r = SESSION.get(url, timeout=(30, 180), allow_redirects=True)
+            r.raise_for_status()
+            data = r.content
+            if len(data) < min_bytes:
+                raise RuntimeError(f"response too small: {len(data)} bytes")
+            dest.write_bytes(data)
+            return SourceRecord(
+                source_id=source_id,
+                url=url,
+                path=str(dest.relative_to(OUT)),
+                status="downloaded",
+                bytes=len(data),
+                sha256=sha256_file(dest),
+                content_type=r.headers.get("content-type"),
+            )
+        except Exception as exc:  # noqa: BLE001
+            last_error = f"{type(exc).__name__}: {exc}"
+            time.sleep(2 ** attempt)
+    return SourceRecord(source_id, url, None, "failed", note=last_error)
+
+
+def safe_json(path: Path, obj: Any) -> None:
+    path.write_text(json.dumps(obj, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+
+
+def render_pdf_first_page(pdf_path: Path, out_path: Path) -> None:
+    doc = fitz.open(pdf_path)
+    page = doc[0]
+    pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0), alpha=False)
+    pix.save(out_path)
+
+
+def normalise_p83(source_path: Path) -> tuple[Path, Path]:
+    image = Image.open(source_path).convert("RGB")
+    upright = image.rotate(90, expand=True)
+    upright_path = DERIVED / "p83-upright.png"
+    upright.save(upright_path)
+
+    overlay = upright.copy()
+    draw = ImageDraw.Draw(overlay)
+    draw.line(P83_OUTER_PIXELS, fill=(220, 20, 60), width=5, joint="curve")
+    for idx, (x, y) in enumerate(P83_OUTER_PIXELS[:-1]):
+        if idx % 4 == 0:
+            draw.ellipse((x - 4, y - 4, x + 4, y + 4), fill=(0, 80, 220))
+    overlay_path = QC / "p83-digitised-outer-qc.png"
+    overlay.save(overlay_path)
+    return upright_path, overlay_path
+
+
+def find_tokyo_park_geometry() -> tuple[Any | None, dict[str, Any]]:
+    report: dict[str, Any] = {"status": "not_started", "resource": None, "candidates": []}
+    try:
+        meta = SESSION.get(SOURCES["tokyo_green_ckan"], timeout=60)
+        meta.raise_for_status()
+        package = meta.json()
+        safe_json(RAW / "tokyo-green-package.json", package)
+        resources = package.get("result", {}).get("resources", [])
+        ranked = []
+        for res in resources:
+            text = " ".join(str(res.get(k, "")) for k in ("name", "description", "url", "format"))
