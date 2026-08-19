@@ -1,0 +1,41 @@
+name: Acquire GSI Suzugamori historical photos
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/suzugamori-boundary-20260811]
+    paths:
+      - '.github/workflows/acquire-gsi-suzugamori.yml'
+      - 'research/acquire_gsi_suzugamori.py'
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Playwright
+        run: |
+          python -m pip install --disable-pip-version-check playwright
+          python -m playwright install --with-deps chromium
+      - name: Acquire public historical photos
+        continue-on-error: true
+        run: python research/acquire_gsi_suzugamori.py
+      - name: Publish summary
+        if: always()
+        run: |
+          echo '## GSI Suzugamori acquisition' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f out-gsi-suzugamori/SUMMARY.json ]; then cat out-gsi-suzugamori/SUMMARY.json >> "$GITHUB_STEP_SUMMARY"; else echo 'SUMMARY missing' >> "$GITHUB_STEP_SUMMARY"; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gsi-suzugamori-historical-photos
+          path: out-gsi-suzugamori
+          if-no-files-found: warn
+          retention-days: 14
