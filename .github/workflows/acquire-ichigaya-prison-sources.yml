@@ -1,0 +1,41 @@
+name: Acquire Ichigaya Prison source evidence
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/ichigaya-prison-boundary-20260811]
+    paths:
+      - '.github/workflows/acquire-ichigaya-prison-sources.yml'
+      - 'research/acquire_ichigaya_prison_sources.py'
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Playwright
+        run: |
+          python -m pip install --disable-pip-version-check playwright
+          python -m playwright install --with-deps chromium
+      - name: Acquire public source evidence
+        continue-on-error: true
+        run: python research/acquire_ichigaya_prison_sources.py
+      - name: Publish summary
+        if: always()
+        run: |
+          echo '## Ichigaya Prison source acquisition' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f out-ichigaya-prison-sources/SUMMARY.json ]; then cat out-ichigaya-prison-sources/SUMMARY.json >> "$GITHUB_STEP_SUMMARY"; else echo 'SUMMARY missing' >> "$GITHUB_STEP_SUMMARY"; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ichigaya-prison-source-evidence
+          path: out-ichigaya-prison-sources
+          if-no-files-found: warn
+          retention-days: 14

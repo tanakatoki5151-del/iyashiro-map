@@ -1,0 +1,82 @@
+name: Acquire Ichigaya Prison source evidence v2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/ichigaya-prison-boundary-20260811]
+    paths:
+      - '.github/workflows/acquire-ichigaya-prison-sources-v2.yml'
+      - 'research/acquire_ichigaya_prison_sources.py'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/ichigaya-prison-boundary-20260811
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Playwright
+        run: |
+          python -m pip install --disable-pip-version-check playwright
+          python -m playwright install --with-deps chromium
+      - name: Acquire public source evidence
+        id: acquire
+        continue-on-error: true
+        run: python research/acquire_ichigaya_prison_sources.py
+      - name: Upload complete acquisition artifact
+        id: upload
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ichigaya-prison-source-evidence-v2
+          path: out-ichigaya-prison-sources
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Write reproducible artifact manifest
+        if: always()
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: |
+          mkdir -p research-results/ichigaya-prison
+          python - <<'PY'
+          import json, os, pathlib, shutil
+          summary_path=pathlib.Path('out-ichigaya-prison-sources/SUMMARY.json')
+          summary=json.loads(summary_path.read_text()) if summary_path.exists() else None
+          manifest={
+            'branch':'research/ichigaya-prison-boundary-20260811',
+            'runId':int(os.environ['GITHUB_RUN_ID']),
+            'runAttempt':int(os.environ['GITHUB_RUN_ATTEMPT']),
+            'headSha':os.environ['GITHUB_SHA'],
+            'artifactId':int(os.environ['ARTIFACT_ID']) if os.environ.get('ARTIFACT_ID') else None,
+            'artifactUrl':os.environ.get('ARTIFACT_URL'),
+            'artifactName':'ichigaya-prison-source-evidence-v2',
+            'summary':summary,
+            'qualityRule':'Research-only source pack. No proxy, post-war photo, or archaeology extent creates a historical boundary or score change.'
+          }
+          out=pathlib.Path('research-results/ichigaya-prison/artifact-manifest.json')
+          out.write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
+          if summary_path.exists(): shutil.copy2(summary_path,'research-results/ichigaya-prison/SUMMARY.json')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add research-results/ichigaya-prison
+          if ! git diff --cached --quiet; then
+            git commit -m 'Record Ichigaya source artifact manifest'
+            git push origin HEAD:research/ichigaya-prison-boundary-20260811
+          fi
+      - name: Publish summary
+        if: always()
+        run: |
+          echo '## Ichigaya Prison source acquisition v2' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f out-ichigaya-prison-sources/SUMMARY.json ]; then cat out-ichigaya-prison-sources/SUMMARY.json >> "$GITHUB_STEP_SUMMARY"; else echo 'SUMMARY missing' >> "$GITHUB_STEP_SUMMARY"; fi
+          echo "Artifact ID: ${{ steps.upload.outputs.artifact-id }}" >> "$GITHUB_STEP_SUMMARY"
