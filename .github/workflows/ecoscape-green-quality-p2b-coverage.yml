@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ecoscape-green-quality-p2b-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   kartaview-metadata-coverage:
     runs-on: ubuntu-latest
