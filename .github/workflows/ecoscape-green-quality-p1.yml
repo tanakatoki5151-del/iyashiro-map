@@ -18,6 +18,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ecoscape-green-quality-micro-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   p1-micro-pilot:
     runs-on: ubuntu-latest
