@@ -1,0 +1,49 @@
+name: EVENTREG official fatal bulk executor
+
+on:
+  push:
+    branches:
+      - eventreg-npa-legacy-repair-20260818
+    paths:
+      - scripts/eventreg_extract_npa_legacy.py
+      - .github/workflows/eventreg-npa-legacy-executor.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/eventreg_extract_npa_legacy.py
+      - .github/workflows/eventreg-npa-legacy-executor.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  harvest-official-fatal-corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out the triggering branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile collector
+        run: python -m py_compile scripts/eventreg_extract_npa_legacy.py
+      - name: Collect and normalize official fatal source corpus
+        run: python scripts/eventreg_extract_npa_legacy.py
+      - name: Read back output
+        if: always()
+        run: |
+          test -f output/SUMMARY.json && cat output/SUMMARY.json || true
+          find output -maxdepth 2 -type f -printf '%p\t%s bytes\n' | sort || true
+      - name: Upload collected corpus
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eventreg-jniosh-fatal-bulk-1991-2018
+          path: output/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
