@@ -1,0 +1,61 @@
+name: Scan priority towns in NDL official catalogue
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/priority-town-official-catalog-scan-20260811]
+    paths:
+      - '.github/workflows/scan-priority-towns-ndl-catalog.yml'
+      - 'research/scan_priority_towns_ndl_catalog.py'
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/priority-town-official-catalog-scan-20260811
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check requests
+      - name: Run official catalogue scan
+        continue-on-error: true
+        run: python research/scan_priority_towns_ndl_catalog.py
+      - name: Package outputs
+        if: always()
+        run: |
+          python - <<'PY'
+          import pathlib,zipfile
+          root=pathlib.Path('out-priority-town-ndl-scan');out=pathlib.Path('priority-town-ndl-catalog-scan-v1-20260811.zip')
+          with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
+            if root.exists():
+              for p in sorted(root.rglob('*')):
+                if p.is_file(): z.write(p,p.relative_to(root.parent))
+          PY
+          sha256sum priority-town-ndl-catalog-scan-v1-20260811.zip > priority-town-ndl-catalog-scan-v1-20260811.zip.sha256
+      - name: Publish durable research release
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag='research-priority-town-ndl-scan-20260811'
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --title 'Research: priority-town NDL catalogue scan 2026-08-11' --notes 'Official-catalog leads only. No-hit is not negative evidence; all results require primary-source and spatial verification.' --target research/priority-town-official-catalog-scan-20260811
+          fi
+          gh release upload "$tag" priority-town-ndl-catalog-scan-v1-20260811.zip priority-town-ndl-catalog-scan-v1-20260811.zip.sha256 --clobber
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: priority-town-ndl-catalog-scan-v1
+          path: |
+            priority-town-ndl-catalog-scan-v1-20260811.zip
+            priority-town-ndl-catalog-scan-v1-20260811.zip.sha256
+            out-priority-town-ndl-scan/SUMMARY.json
+          if-no-files-found: warn
+          retention-days: 14
