@@ -1,0 +1,56 @@
+name: Acquire GSI historical photo evidence
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/mlit-l03b-acquisition-20260811]
+    paths:
+      - '.github/workflows/acquire-gsi-sugamo-prison.yml'
+      - 'research/acquire_gsi_sugamo_prison.py'
+      - 'research/acquire_gsi_oyama_direct_bbox.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/acquire-gsi-sugamo-prison.yml'
+      - 'research/acquire_gsi_sugamo_prison.py'
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --disable-pip-version-check playwright requests
+          python -m playwright install --with-deps chromium
+      - name: Search and acquire Sugamo historical photos
+        continue-on-error: true
+        run: python research/acquire_gsi_sugamo_prison.py
+      - name: Direct-bbox Oyama Nishihara historical photos
+        continue-on-error: true
+        run: python research/acquire_gsi_oyama_direct_bbox.py
+      - name: Publish summaries
+        if: always()
+        shell: bash
+        run: |
+          echo '## GSI historical-photo acquisition' >> "$GITHUB_STEP_SUMMARY"
+          for f in out-gsi-sugamo-prison/SUMMARY.json out-gsi-oyama-direct-bbox/SUMMARY.json; do
+            echo "### $f" >> "$GITHUB_STEP_SUMMARY"
+            if [ -f "$f" ]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; else echo 'not produced' >> "$GITHUB_STEP_SUMMARY"; fi
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gsi-sugamo-plus-oyama-direct-bbox
+          path: |
+            out-gsi-sugamo-prison
+            out-gsi-oyama-direct-bbox
+          if-no-files-found: warn
+          retention-days: 14

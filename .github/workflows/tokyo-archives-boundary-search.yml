@@ -1,0 +1,42 @@
+name: Tokyo Archives execution-ground record search
+
+on:
+  push:
+    branches:
+      - research/mlit-l03b-acquisition-20260811
+    paths:
+      - 'research/search_tokyo_archives_boundary_records.py'
+      - '.github/workflows/tokyo-archives-boundary-search.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check requests beautifulsoup4
+      - run: python research/search_tokyo_archives_boundary_records.py
+      - name: Print summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('out-tokyo-archives-boundary-search/REPORT.json'))
+          print(json.dumps(d['summary'],ensure_ascii=False,indent=2))
+          for x in d['uniqueRecords'][:30]:
+              print(x['cls'],x['pkey'],x['linkText'],x['foundBy'])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tokyo-archives-boundary-search
+          path: out-tokyo-archives-boundary-search
+          if-no-files-found: warn
+          retention-days: 14

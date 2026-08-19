@@ -1,0 +1,31 @@
+name: Probe Meguro Kakinokizaka greenway PDF
+
+on:
+  push:
+    branches: [research/mlit-l03b-acquisition-20260811]
+    paths:
+      - 'research/acquire_meguro_kakinokizaka_greenway_plan.py'
+      - '.github/workflows/probe-meguro-kakinokizaka-greenway.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check requests pymupdf
+      - run: python research/acquire_meguro_kakinokizaka_greenway_plan.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: meguro-kakinokizaka-greenway-official-plan
+          path: out-meguro-kakinokizaka-greenway-plan
+          if-no-files-found: warn
+          retention-days: 14

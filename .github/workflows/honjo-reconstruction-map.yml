@@ -1,0 +1,76 @@
+name: Honjo reconstruction map public-source probe
+
+on:
+  push:
+    branches:
+      - research/mlit-l03b-acquisition-20260811
+    paths:
+      - '.github/workflows/honjo-reconstruction-map.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check requests beautifulsoup4
+      - name: Fetch Tokyo Archives Honjo reconstruction map page and public images
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p out
+          page='https://www.soumu.metro.tokyo.lg.jp/01soumu-archives/07edo_tokyo/0701syoko_kara11'
+          curl -fL --connect-timeout 15 --max-time 90 --retry 3 -A 'Mozilla/5.0 iyashiro-map research' "$page" -o out/page.html
+          python3 - <<'PY'
+          from pathlib import Path
+          from bs4 import BeautifulSoup
+          import urllib.parse, json
+          html=Path('out/page.html').read_text(errors='ignore')
+          base='https://www.soumu.metro.tokyo.lg.jp/01soumu-archives/07edo_tokyo/0701syoko_kara11'
+          soup=BeautifulSoup(html,'html.parser')
+          rows=[]
+          for img in soup.find_all('img'):
+              src=img.get('src')
+              if not src: continue
+              u=urllib.parse.urljoin(base,src)
+              fid=img.get('data-fileentryid')
+              alt=img.get('alt','')
+              if fid or '0701syoko_kara11' in u:
+                  rows.append({'url':u,'fileEntryId':fid,'alt':alt})
+          seen=set(); rows=[r for r in rows if not (r['url'] in seen or seen.add(r['url']))]
+          Path('out/candidates.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps(rows,ensure_ascii=False,indent=2))
+          PY
+          python3 - <<'PY'
+          import json, pathlib, requests, hashlib, re
+          out=pathlib.Path('out'); rows=json.loads((out/'candidates.json').read_text())
+          s=requests.Session(); s.headers.update({'User-Agent':'Mozilla/5.0 iyashiro-map research','Referer':'https://www.soumu.metro.tokyo.lg.jp/'})
+          report=[]
+          for i,item in enumerate(rows):
+              u=item['url']
+              try:
+                  r=s.get(u,timeout=60); ct=(r.headers.get('content-type') or '').lower()
+                  rec={**item,'status':r.status_code,'finalUrl':r.url,'contentType':ct,'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest()}
+                  if r.ok and ct.startswith('image/') and len(r.content)>10000:
+                      ext='png' if 'png' in ct else 'jpg'
+                      slug=re.sub(r'[^A-Za-z0-9_-]+','_',item.get('alt') or f'asset_{i}')[:60]
+                      fn=f'{i:02d}_{item.get("fileEntryId") or "na"}_{slug}.{ext}'
+                      (out/fn).write_bytes(r.content); rec['savedAs']=fn
+                  report.append(rec)
+              except Exception as e: report.append({**item,'error':repr(e)})
+          (out/'REPORT.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+          PY
+          sha256sum out/* > out/SHA256SUMS.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: honjo-reconstruction-map
+          path: out
+          if-no-files-found: warn
+          retention-days: 14

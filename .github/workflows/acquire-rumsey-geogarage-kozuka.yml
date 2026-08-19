@@ -1,0 +1,51 @@
+name: Acquire Rumsey georeferenced Kozukappara map views
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/mlit-l03b-acquisition-20260811]
+    paths:
+      - '.github/workflows/acquire-rumsey-geogarage-kozuka.yml'
+      - 'research/acquire_rumsey_geogarage_kozuka.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/acquire-rumsey-geogarage-kozuka.yml'
+      - 'research/acquire_rumsey_geogarage_kozuka.py'
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install browser dependencies
+        run: |
+          python -m pip install --disable-pip-version-check playwright
+          python -m playwright install --with-deps chromium
+      - name: Capture Tokyo 1858 and 1892 map views at Kozukappara
+        continue-on-error: true
+        run: python research/acquire_rumsey_geogarage_kozuka.py
+      - name: Publish summary
+        if: always()
+        shell: bash
+        run: |
+          echo '## Rumsey GeoGarage Kozukappara acquisition' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f out-rumsey-geogarage-kozuka/SUMMARY.json ]; then
+            cat out-rumsey-geogarage-kozuka/SUMMARY.json >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'SUMMARY.json was not produced' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rumsey-geogarage-kozuka
+          path: out-rumsey-geogarage-kozuka
+          if-no-files-found: warn
+          retention-days: 14

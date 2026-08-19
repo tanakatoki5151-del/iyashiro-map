@@ -1,0 +1,35 @@
+name: Probe UTokyo medical juvenile photo image link
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/mlit-l03b-acquisition-20260811]
+    paths:
+      - 'research/probe_utokyo_medical_juvenile_image_link.py'
+      - '.github/workflows/probe-utokyo-medical-juvenile-image.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check requests
+      - name: Probe official UTokyo catalog target row
+        run: python research/probe_utokyo_medical_juvenile_image_link.py
+      - name: Publish summary
+        if: always()
+        run: cat out-utokyo-medical-juvenile-photo/SUMMARY.json || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: utokyo-medical-juvenile-photo-link-probe
+          path: out-utokyo-medical-juvenile-photo
+          if-no-files-found: warn
+          retention-days: 14

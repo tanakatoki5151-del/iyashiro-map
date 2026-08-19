@@ -1,0 +1,29 @@
+name: Probe JICA Tokyo 1986 site history
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/mlit-l03b-acquisition-20260811]
+    paths:
+      - 'research/probe_jica_tokyo_1986_site_history.py'
+      - '.github/workflows/probe-jica-tokyo-1986-site-history.yml'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: python -m pip install --disable-pip-version-check requests pypdf
+      - run: python research/probe_jica_tokyo_1986_site_history.py
+      - if: always()
+        run: cat out-jica-tokyo-1986-site-history/SUMMARY.json || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jica-tokyo-1986-site-history
+          path: out-jica-tokyo-1986-site-history
+          retention-days: 14

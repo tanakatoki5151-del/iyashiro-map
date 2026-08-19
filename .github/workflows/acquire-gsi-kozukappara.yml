@@ -1,0 +1,51 @@
+name: Acquire GSI Kozukappara historical photos
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/mlit-l03b-acquisition-20260811]
+    paths:
+      - '.github/workflows/acquire-gsi-kozukappara.yml'
+      - 'research/acquire_gsi_kozukappara.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/acquire-gsi-kozukappara.yml'
+      - 'research/acquire_gsi_kozukappara.py'
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Playwright
+        run: |
+          python -m pip install --disable-pip-version-check playwright
+          python -m playwright install --with-deps chromium
+      - name: Search and acquire Kozukappara historical photos
+        continue-on-error: true
+        run: python research/acquire_gsi_kozukappara.py
+      - name: Publish summary
+        if: always()
+        shell: bash
+        run: |
+          echo '## GSI Kozukappara historical-photo acquisition' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f out-gsi-kozukappara/SUMMARY.json ]; then
+            cat out-gsi-kozukappara/SUMMARY.json >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'SUMMARY.json not produced' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gsi-kozukappara-historical-photos
+          path: out-gsi-kozukappara
+          if-no-files-found: warn
+          retention-days: 14

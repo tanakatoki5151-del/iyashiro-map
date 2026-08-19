@@ -1,0 +1,73 @@
+name: Tokyo Library Honjo fire-insurance map probe
+
+on:
+  push:
+    branches:
+      - research/mlit-l03b-acquisition-20260811
+    paths:
+      - '.github/workflows/tokyo-library-honjo-firemap-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Probe catalogue and Digital BookShelf linkage
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p out
+          ua='Mozilla/5.0 iyashiro-map research'
+          base='https://catalog.library.metro.tokyo.lg.jp'
+          # Known neighboring record used to inspect Digital BookShelf link markup.
+          curl -fL --connect-timeout 15 --max-time 60 -A "$ua" \
+            "$base/winj/opac/switch-detail.do?bibid=1100579796&lang=ja" \
+            -o out/known-hongo-detail.html || true
+          # Search/catalogue pages and known collection metadata.
+          for u in \
+            'https://www.library.metro.tokyo.lg.jp/lib_info_tokyo/house_map_union_catalog/bunkyo/' \
+            'https://www.library.metro.tokyo.lg.jp/search/uploads/chizumokuroku202306_2_ippan.pdf' \
+            'https://catalog.library.metro.tokyo.lg.jp/winj/opac/search-standard.do?lang=ja'; do
+            fn=$(echo "$u" | sed 's#[^A-Za-z0-9]#_#g' | tail -c 120)
+            curl -L --connect-timeout 15 --max-time 60 -A "$ua" "$u" -o "out/${fn}" || true
+          done
+          python3 - <<'PY'
+          import json,re,pathlib,html
+          out=pathlib.Path('out')
+          report={'target':{'title':'本所区・向島区 [1933-1935]','materialCode':'1123363915','callNumber':'DRT/0・339/2/31,32'},'findings':[]}
+          for p in out.iterdir():
+            if not p.is_file(): continue
+            try: txt=p.read_text(errors='ignore')
+            except: continue
+            for needle in ['1123363915','Digital BookShelf','iLisvirtual','holcd','bibid','本所区','向島区']:
+              if needle in txt:
+                snippets=[]
+                for m in list(re.finditer(re.escape(needle),txt,re.I))[:12]:
+                  a=max(0,m.start()-500); b=min(len(txt),m.end()+800)
+                  snippets.append(html.unescape(re.sub(r'\\s+',' ',txt[a:b])))
+                report['findings'].append({'file':p.name,'needle':needle,'snippets':snippets})
+          # Harvest candidate URLs surrounding iLisvirtual/digital-book markers.
+          urls=[]
+          for p in out.iterdir():
+            if not p.is_file(): continue
+            try: txt=p.read_text(errors='ignore')
+            except: continue
+            for x in re.findall(r'https?://[^\"\'<> ]+|/[^\"\'<> ]+',txt):
+              x=html.unescape(x).replace('\\/','/')
+              if any(k.lower() in x.lower() for k in ['ilisvirtual','digital','switch-detail','1123363915']):
+                urls.append(x[:1500])
+          report['candidateUrls']=list(dict.fromkeys(urls))[:300]
+          (out/'REPORT.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+          PY
+          sha256sum out/* > out/SHA256SUMS.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tokyo-library-honjo-firemap-probe
+          path: out
+          if-no-files-found: warn
+          retention-days: 14

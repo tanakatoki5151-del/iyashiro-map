@@ -1,0 +1,47 @@
+name: Top10 Tokyo archaeological proximity v1
+
+on:
+  push:
+    branches: [research/mlit-l03b-acquisition-20260811]
+    paths:
+      - 'research/scan_top10_tokyo_iseki_v1.py'
+      - '.github/workflows/top10-tokyo-iseki-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --disable-pip-version-check playwright pyproj shapely
+          python -m playwright install --with-deps chromium
+      - name: Scan official Tokyo archaeological service
+        run: python research/scan_top10_tokyo_iseki_v1.py
+      - name: Publish summary
+        if: always()
+        run: |
+          if [ -f out-top10-tokyo-iseki-v1/SUMMARY.json ]; then
+            python - <<'PY'
+          import json
+          d=json.load(open('out-top10-tokyo-iseki-v1/SUMMARY.json'))
+          print('acceptedTerms',d.get('acceptedTerms'))
+          for x in d.get('cellSummary',[]):
+              print(x['rank'],x['address'],x['cellId'],'sites=',x['returnedSiteRows'],'kw=',x['keywordRows'],'within=',x['withinApproxCellRows'],'near=',x['nearestDistanceM'])
+          PY
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: top10-tokyo-iseki-v1
+          path: out-top10-tokyo-iseki-v1
+          if-no-files-found: warn
+          retention-days: 14
