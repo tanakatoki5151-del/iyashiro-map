@@ -1,4 +1,4 @@
-name: ECOSCAPE F14 Automated Open Imagery
+name: ECOSCAPE F14R2 Automated Open Imagery
 
 on:
   workflow_dispatch:
@@ -16,8 +16,8 @@ jobs:
     timeout-minutes: 180
     env:
       MAPILLARY_ACCESS_TOKEN: ${{ secrets.MAPILLARY_ACCESS_TOKEN }}
-      F14_DRIVE_ID: 1Ow-5EPKNYDFAgujuQZikUQWTqC4zNDFR
-      F14_SHA256: a569f2c63d21046db3b87818a4bce7d8fd09f5a501cc6b808683b2a50406b4bb
+      F14R2_DRIVE_ID: 1OK7V5qCEyowO6NR_Udkr7UyIB_baj2xl
+      F14R2_SHA256: 6a8435a3f8bb9468b7f594cef06437b7d479dfea5f3b40b86626126f8ebdb51a
     steps:
       - uses: actions/checkout@v4
 
@@ -25,17 +25,17 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Download and verify Drive-canonical F14 package
+      - name: Download and verify Drive-canonical F14R2 package
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/f14-source
+          mkdir -p /tmp/f14r2-source
           curl --fail --location --retry 5 --retry-delay 3 \
-            "https://drive.usercontent.google.com/download?id=${F14_DRIVE_ID}&export=download&confirm=t" \
-            -o /tmp/f14-source/f14.zip
-          echo "${F14_SHA256}  /tmp/f14-source/f14.zip" | sha256sum -c -
-          unzip -q /tmp/f14-source/f14.zip -d /tmp/f14-source/package
-          test -f /tmp/f14-source/package/code/f14_open_imagery_auto.py
+            "https://drive.usercontent.google.com/download?id=${F14R2_DRIVE_ID}&export=download&confirm=t" \
+            -o /tmp/f14r2-source/f14r2.zip
+          echo "${F14R2_SHA256}  /tmp/f14r2-source/f14r2.zip" | sha256sum -c -
+          unzip -q /tmp/f14r2-source/f14r2.zip -d /tmp/f14r2-source/package
+          test -f /tmp/f14r2-source/package/code/f14_open_imagery_auto.py
 
       - name: Install probe dependencies
         run: |
@@ -44,17 +44,17 @@ jobs:
 
       - name: Self-test and write canonical 50-case queue
         run: |
-          python /tmp/f14-source/package/code/f14_open_imagery_auto.py self-test
-          rm -rf /tmp/ecoscape-f14
-          mkdir -p /tmp/ecoscape-f14
-          python /tmp/f14-source/package/code/f14_open_imagery_auto.py write-default-queue \
-            --output /tmp/ecoscape-f14/F14_OPEN_IMAGERY_QUEUE_50.csv
+          python /tmp/f14r2-source/package/code/f14_open_imagery_auto.py self-test
+          rm -rf /tmp/ecoscape-f14r2
+          mkdir -p /tmp/ecoscape-f14r2
+          python /tmp/f14r2-source/package/code/f14_open_imagery_auto.py write-default-queue \
+            --output /tmp/ecoscape-f14r2/F14R2_OPEN_IMAGERY_QUEUE_50.csv
 
-      - name: Probe official Mapillary and KartaView APIs
+      - name: Probe official Mapillary and KartaView APIs including KartaView photo details
         run: |
-          python /tmp/f14-source/package/code/f14_open_imagery_auto.py probe \
-            --queue /tmp/ecoscape-f14/F14_OPEN_IMAGERY_QUEUE_50.csv \
-            --output /tmp/ecoscape-f14/probe
+          python /tmp/f14r2-source/package/code/f14_open_imagery_auto.py probe \
+            --queue /tmp/ecoscape-f14r2/F14R2_OPEN_IMAGERY_QUEUE_50.csv \
+            --output /tmp/ecoscape-f14r2/probe
 
       - name: Read coverage gate
         id: coverage
@@ -63,7 +63,7 @@ jobs:
           python - <<'PY'
           import json, os
           from pathlib import Path
-          audit=json.loads(Path('/tmp/ecoscape-f14/probe/F14_COVERAGE_AUDIT.json').read_text())
+          audit=json.loads(Path('/tmp/ecoscape-f14r2/probe/F14R2_COVERAGE_AUDIT.json').read_text())
           print(json.dumps(audit,ensure_ascii=False,indent=2))
           with open(os.environ['GITHUB_OUTPUT'],'a') as stream:
               stream.write(f"ready={audit['casesReadyForAutomatedAnalysis']}\n")
@@ -78,16 +78,16 @@ jobs:
       - name: Run fully automated image analysis
         if: steps.coverage.outputs.ready != '0'
         run: |
-          python /tmp/f14-source/package/code/f14_open_imagery_auto.py analyze \
-            --manifest /tmp/ecoscape-f14/probe/F14_SELECTED_IMAGE_MANIFEST.csv \
-            --output /tmp/ecoscape-f14/analysis
+          python /tmp/f14r2-source/package/code/f14_open_imagery_auto.py analyze \
+            --manifest /tmp/ecoscape-f14r2/probe/F14R2_SELECTED_IMAGE_MANIFEST.csv \
+            --output /tmp/ecoscape-f14r2/analysis
 
       - name: Assert no image bytes are shipped
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          if find /tmp/ecoscape-f14 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) | grep -q .; then
+          if find /tmp/ecoscape-f14r2 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) | grep -q .; then
             echo 'Image bytes unexpectedly remained in the release workspace.'
             exit 1
           fi
@@ -95,7 +95,7 @@ jobs:
           import json, os
           from pathlib import Path
           receipt={
-            'buildId':'ecoscape-open-imagery-auto-f14-20260820',
+            'buildId':'ecoscape-open-imagery-auto-f14r2-20260820',
             'mapillaryTokenPresent':bool(os.environ.get('MAPILLARY_ACCESS_TOKEN')),
             'googleImageryUsed':False,
             'imageBytesIncludedInArtifact':0,
@@ -104,22 +104,22 @@ jobs:
             'candidateOverride':0,
           }
           for key,path in [
-            ('coverageAudit',Path('/tmp/ecoscape-f14/probe/F14_COVERAGE_AUDIT.json')),
-            ('analysisAudit',Path('/tmp/ecoscape-f14/analysis/F14_ANALYSIS_AUDIT.json')),
+            ('coverageAudit',Path('/tmp/ecoscape-f14r2/probe/F14R2_COVERAGE_AUDIT.json')),
+            ('analysisAudit',Path('/tmp/ecoscape-f14r2/analysis/F14R2_ANALYSIS_AUDIT.json')),
           ]:
             if path.exists():
               receipt[key]=json.loads(path.read_text())
-          Path('/tmp/ecoscape-f14/F14_RELEASE_RECEIPT.json').write_text(
+          Path('/tmp/ecoscape-f14r2/F14R2_RELEASE_RECEIPT.json').write_text(
             json.dumps(receipt,ensure_ascii=False,indent=2)+'\n'
           )
           PY
-          cd /tmp/ecoscape-f14
+          cd /tmp/ecoscape-f14r2
           find . -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ecoscape-green-quality-f14-open-imagery
-          path: /tmp/ecoscape-f14
+          name: ecoscape-green-quality-f14r2-open-imagery
+          path: /tmp/ecoscape-f14r2
           if-no-files-found: error
           retention-days: 30
