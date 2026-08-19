@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """ECOSCAPE P1 micro-pilot.
 
-Queries public STAC catalogues and reads small COG windows around six fixed
-500 m pilot areas. It creates multi-year seasonal vegetation statistics and
+Queries public STAC catalogues and reads small COG windows around fixed 500 m
+pilot areas. It creates multi-year seasonal vegetation statistics and
 multi-date summer surface-temperature statistics. It does not rank or rescore
 ECOSCAPE cells.
 """
@@ -25,7 +25,14 @@ from rasterio.windows import from_bounds
 from rasterio.warp import transform
 
 ROOT = Path(__file__).resolve().parent
-AREAS_CSV = ROOT / "P1_MICRO_PILOT_AREAS.csv"
+AREAS_CSV = Path(
+    os.environ.get("ECOSCAPE_P1_AREAS_CSV", ROOT / "P1_MICRO_PILOT_AREAS.csv")
+)
+SHARD_INDEX = int(os.environ.get("ECOSCAPE_P1_SHARD_INDEX", "0"))
+SHARD_COUNT = int(os.environ.get("ECOSCAPE_P1_SHARD_COUNT", "1"))
+BUILD_ID = os.environ.get(
+    "ECOSCAPE_P1_BUILD_ID", "ecoscape-green-quality-p1-micro-20260819-v2"
+)
 OUT = Path(os.environ.get("ECOSCAPE_P1_OUTPUT", ROOT / "output"))
 OUT.mkdir(parents=True, exist_ok=True)
 
@@ -67,13 +74,17 @@ class PilotArea:
 def read_areas() -> list[PilotArea]:
     df = pd.read_csv(AREAS_CSV)
     required = {
-        "pilotId", "pilotCategory", "canonicalCellId",
-        "latitude", "longitude", "officialAreaLabel",
+        "pilotId",
+        "pilotCategory",
+        "canonicalCellId",
+        "latitude",
+        "longitude",
+        "officialAreaLabel",
     }
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"Missing pilot columns: {sorted(missing)}")
-    return [
+    areas = [
         PilotArea(
             pilot_id=str(r.pilotId),
             category=str(r.pilotCategory),
@@ -82,8 +93,22 @@ def read_areas() -> list[PilotArea]:
             lon=float(r.longitude),
             label=str(r.officialAreaLabel),
         )
-        for r in df.itertuples(index=False)
+        for r in df.sort_values("pilotId").itertuples(index=False)
     ]
+    if SHARD_COUNT < 1 or not (0 <= SHARD_INDEX < SHARD_COUNT):
+        raise ValueError(f"Invalid shard index/count: {SHARD_INDEX}/{SHARD_COUNT}")
+    if SHARD_COUNT > 1:
+        areas = [
+            area
+            for ordinal, area in enumerate(areas)
+            if ordinal % SHARD_COUNT == SHARD_INDEX
+        ]
+    if not areas:
+        raise ValueError(
+            f"No pilot areas selected from {AREAS_CSV} "
+            f"for shard {SHARD_INDEX}/{SHARD_COUNT}"
+        )
+    return areas
 
 
 def pick_asset(item: Item, names: Iterable[str]) -> Any:
@@ -97,6 +122,32 @@ def pick_asset(item: Item, names: Iterable[str]) -> Any:
     raise KeyError(
         f"None of assets {list(names)} in {item.id}; keys={sorted(item.assets)}"
     )
+
+
+def dedupe_items_by_datetime(items: Iterable[Item]) -> tuple[list[Item], int]:
+    """Keep one item per acquisition time, preferring lower cloud cover.
+
+    Sentinel acquisitions can appear once per overlapping MGRS tile. Treating
+    those tiles as separate dates would overweight one observation.
+    """
+    original = list(items)
+    best: dict[str, Item] = {}
+    for item in original:
+        dt = (
+            item.datetime.isoformat()
+            if item.datetime
+            else str(item.properties.get("datetime") or item.id)
+        )
+        current = best.get(dt)
+        if current is None or item.properties.get(
+            "eo:cloud_cover", 1000
+        ) < current.properties.get("eo:cloud_cover", 1000):
+            best[dt] = item
+    unique = sorted(
+        best.values(),
+        key=lambda x: (x.properties.get("eo:cloud_cover", 1000), x.id),
+    )
+    return unique, max(0, len(original) - len(unique))
 
 
 def read_point_window(
@@ -161,7 +212,9 @@ def s2_scene_metrics(item: Item, area: PilotArea) -> dict[str, Any]:
             pick_asset(item, candidates),
             area.lon,
             area.lat,
-            resampling=(Resampling.nearest if key == "scl" else Resampling.bilinear),
+            resampling=(
+                Resampling.nearest if key == "scl" else Resampling.bilinear
+            ),
         )
     scl = np.rint(arrays["scl"]).astype("int16")
     valid = ~np.isin(scl, list(INVALID_SCL))
@@ -172,8 +225,11 @@ def s2_scene_metrics(item: Item, area: PilotArea) -> dict[str, Any]:
     nir08 = arrays["nir08"] * 1e-4
     swir = arrays["swir16"] * 1e-4
     valid &= (
-        (blue > 0) & (red > 0) & (nir > 0) &
-        (nir08 > 0) & (swir > 0)
+        (blue > 0)
+        & (red > 0)
+        & (nir > 0)
+        & (nir08 > 0)
+        & (swir > 0)
     )
     ndvi = safe_ratio(nir - red, nir + red)
     evi = 2.5 * safe_ratio(nir - red, nir + 6 * red - 7.5 * blue + 1.0)
@@ -182,7 +238,11 @@ def s2_scene_metrics(item: Item, area: PilotArea) -> dict[str, Any]:
     for arr in (ndvi, evi, ndmi, ndre):
         arr[~valid] = np.nan
         arr[(arr < -1.5) | (arr > 1.5)] = np.nan
-    dt = item.datetime.isoformat() if item.datetime else item.properties.get("datetime")
+    dt = (
+        item.datetime.isoformat()
+        if item.datetime
+        else item.properties.get("datetime")
+    )
     return {
         "pilotId": area.pilot_id,
         "pilotCategory": area.category,
@@ -201,11 +261,18 @@ def s2_scene_metrics(item: Item, area: PilotArea) -> dict[str, Any]:
     }
 
 
-def search_s2(client: Client, area: PilotArea, start: str, end: str) -> list[Item]:
+def search_s2(
+    client: Client, area: PilotArea, start: str, end: str
+) -> list[Item]:
     delta = 0.006
     search = client.search(
         collections=[S2_COLLECTION],
-        bbox=[area.lon - delta, area.lat - delta, area.lon + delta, area.lat + delta],
+        bbox=[
+            area.lon - delta,
+            area.lat - delta,
+            area.lon + delta,
+            area.lat + delta,
+        ],
         datetime=f"{start}/{end}",
         query={"eo:cloud_cover": {"lt": 60}},
         max_items=20,
@@ -237,11 +304,18 @@ def landsat_scene_metrics(raw_item: Item, area: PilotArea) -> dict[str, Any]:
     for bit in (1, 2, 3, 4, 5):
         invalid |= (qa & (1 << bit)) != 0
     valid = (
-        (~invalid) & (thermal > 0) & np.isfinite(celsius) &
-        (celsius > -20) & (celsius < 90)
+        (~invalid)
+        & (thermal > 0)
+        & np.isfinite(celsius)
+        & (celsius > -20)
+        & (celsius < 90)
     )
     celsius[~valid] = np.nan
-    dt = item.datetime.isoformat() if item.datetime else item.properties.get("datetime")
+    dt = (
+        item.datetime.isoformat()
+        if item.datetime
+        else item.properties.get("datetime")
+    )
     return {
         "pilotId": area.pilot_id,
         "pilotCategory": area.category,
@@ -261,13 +335,23 @@ def search_landsat(client: Client, area: PilotArea, year: int) -> list[Item]:
     delta = 0.006
     search = client.search(
         collections=[LANDSAT_COLLECTION],
-        bbox=[area.lon - delta, area.lat - delta, area.lon + delta, area.lat + delta],
+        bbox=[
+            area.lon - delta,
+            area.lat - delta,
+            area.lon + delta,
+            area.lat + delta,
+        ],
         datetime=f"{year}-06-01/{year}-09-15",
         query={"eo:cloud_cover": {"lt": 70}},
         max_items=20,
     )
+    items = [
+        item
+        for item in search.items()
+        if item.id.startswith(("LC08_", "LC09_"))
+    ]
     return sorted(
-        search.items(),
+        items,
         key=lambda x: (x.properties.get("eo:cloud_cover", 1000), x.id),
     )
 
@@ -281,12 +365,19 @@ def seasonal_summary(scene_df: pd.DataFrame) -> pd.DataFrame:
     if scene_df.empty:
         return pd.DataFrame()
     metrics = [
-        "ndviMedian", "eviMedian", "ndmiMedian",
-        "ndreMedian", "validFraction500m",
+        "ndviMedian",
+        "eviMedian",
+        "ndmiMedian",
+        "ndreMedian",
+        "validFraction500m",
     ]
     keys = [
-        "pilotId", "pilotCategory", "canonicalCellId",
-        "officialAreaLabel", "year", "season",
+        "pilotId",
+        "pilotCategory",
+        "canonicalCellId",
+        "officialAreaLabel",
+        "year",
+        "season",
     ]
     grouped = scene_df.groupby(keys, dropna=False)
     out = grouped[metrics].median().reset_index()
@@ -303,10 +394,18 @@ def seasonal_summary(scene_df: pd.DataFrame) -> pd.DataFrame:
 def thermal_summary(scene_df: pd.DataFrame) -> pd.DataFrame:
     if scene_df.empty:
         return pd.DataFrame()
-    metrics = ["lstMedianC", "lstP10C", "lstP90C", "validFraction500m"]
+    metrics = [
+        "lstMedianC",
+        "lstP10C",
+        "lstP90C",
+        "validFraction500m",
+    ]
     keys = [
-        "pilotId", "pilotCategory", "canonicalCellId",
-        "officialAreaLabel", "year",
+        "pilotId",
+        "pilotCategory",
+        "canonicalCellId",
+        "officialAreaLabel",
+        "year",
     ]
     grouped = scene_df.groupby(keys, dropna=False)
     out = grouped[metrics].median().reset_index()
@@ -327,6 +426,7 @@ def main() -> None:
     s2_rows: list[dict[str, Any]] = []
     ls_rows: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
+    sentinel_duplicate_candidates_skipped = 0
 
     for area in areas:
         for year in YEARS:
@@ -334,11 +434,18 @@ def main() -> None:
                 start, end = date_window(year, season)
                 try:
                     items = search_s2(s2_client, area, start, end)
+                    items, skipped = dedupe_items_by_datetime(items)
+                    sentinel_duplicate_candidates_skipped += skipped
                 except Exception as exc:
-                    errors.append({
-                        "source": "S2_SEARCH", "pilotId": area.pilot_id,
-                        "year": year, "season": season, "error": repr(exc),
-                    })
+                    errors.append(
+                        {
+                            "source": "S2_SEARCH",
+                            "pilotId": area.pilot_id,
+                            "year": year,
+                            "season": season,
+                            "error": repr(exc),
+                        }
+                    )
                     continue
                 accepted = 0
                 for item in items[:6]:
@@ -351,26 +458,35 @@ def main() -> None:
                         if accepted >= 3:
                             break
                     except Exception as exc:
-                        errors.append({
-                            "source": "S2_SCENE", "pilotId": area.pilot_id,
-                            "year": year, "season": season,
-                            "itemId": item.id, "error": repr(exc),
-                        })
+                        errors.append(
+                            {
+                                "source": "S2_SCENE",
+                                "pilotId": area.pilot_id,
+                                "year": year,
+                                "season": season,
+                                "itemId": item.id,
+                                "error": repr(exc),
+                            }
+                        )
             try:
                 items = search_landsat(landsat_client, area, year)
             except Exception as exc:
-                errors.append({
-                    "source": "LANDSAT_SEARCH", "pilotId": area.pilot_id,
-                    "year": year, "error": repr(exc),
-                })
+                errors.append(
+                    {
+                        "source": "LANDSAT_SEARCH",
+                        "pilotId": area.pilot_id,
+                        "year": year,
+                        "error": repr(exc),
+                    }
+                )
                 continue
             accepted = 0
             for item in items[:10]:
                 try:
                     row = landsat_scene_metrics(item, area)
                     if (
-                        row["validFraction500m"] >= 0.35 and
-                        row["lstMedianC"] is not None
+                        row["validFraction500m"] >= 0.35
+                        and row["lstMedianC"] is not None
                     ):
                         row.update({"year": year})
                         ls_rows.append(row)
@@ -378,10 +494,15 @@ def main() -> None:
                     if accepted >= 4:
                         break
                 except Exception as exc:
-                    errors.append({
-                        "source": "LANDSAT_SCENE", "pilotId": area.pilot_id,
-                        "year": year, "itemId": item.id, "error": repr(exc),
-                    })
+                    errors.append(
+                        {
+                            "source": "LANDSAT_SCENE",
+                            "pilotId": area.pilot_id,
+                            "year": year,
+                            "itemId": item.id,
+                            "error": repr(exc),
+                        }
+                    )
 
     s2_df = pd.DataFrame(s2_rows)
     ls_df = pd.DataFrame(ls_rows)
@@ -400,36 +521,59 @@ def main() -> None:
 
     coverage = []
     for area in areas:
-        s2a = s2_df[s2_df.pilotId == area.pilot_id] if not s2_df.empty else pd.DataFrame()
-        lsa = ls_df[ls_df.pilotId == area.pilot_id] if not ls_df.empty else pd.DataFrame()
-        coverage.append({
-            "pilotId": area.pilot_id,
-            "pilotCategory": area.category,
-            "canonicalCellId": area.cell_id,
-            "officialAreaLabel": area.label,
-            "sentinelAcceptedScenes": len(s2a),
-            "sentinelCoveredYearSeasons": (
-                int(s2a[["year", "season"]].drop_duplicates().shape[0])
-                if not s2a.empty else 0
-            ),
-            "landsatAcceptedSummerScenes": len(lsa),
-            "landsatCoveredYears": (
-                int(lsa[["year"]].drop_duplicates().shape[0])
-                if not lsa.empty else 0
-            ),
-        })
-    pd.DataFrame(coverage).to_csv(OUT / "P1_COVERAGE_SUMMARY.csv", index=False)
+        s2a = (
+            s2_df[s2_df.pilotId == area.pilot_id]
+            if not s2_df.empty
+            else pd.DataFrame()
+        )
+        lsa = (
+            ls_df[ls_df.pilotId == area.pilot_id]
+            if not ls_df.empty
+            else pd.DataFrame()
+        )
+        coverage.append(
+            {
+                "pilotId": area.pilot_id,
+                "pilotCategory": area.category,
+                "canonicalCellId": area.cell_id,
+                "officialAreaLabel": area.label,
+                "sentinelAcceptedScenes": len(s2a),
+                "sentinelCoveredYearSeasons": (
+                    int(s2a[["year", "season"]].drop_duplicates().shape[0])
+                    if not s2a.empty
+                    else 0
+                ),
+                "landsatAcceptedSummerScenes": len(lsa),
+                "landsatCoveredYears": (
+                    int(lsa[["year"]].drop_duplicates().shape[0])
+                    if not lsa.empty
+                    else 0
+                ),
+            }
+        )
+    pd.DataFrame(coverage).to_csv(
+        OUT / "P1_COVERAGE_SUMMARY.csv", index=False
+    )
     audit = {
-        "buildId": "ecoscape-green-quality-p1-micro-20260819-v1",
+        "buildId": BUILD_ID,
         "pilotAreas": len(areas),
+        "areasCsv": str(AREAS_CSV),
+        "shardIndex": SHARD_INDEX,
+        "shardCount": SHARD_COUNT,
         "sentinelSceneRows": len(s2_df),
         "landsatSceneRows": len(ls_df),
         "errorCount": len(errors),
+        "sentinelDuplicateCandidatesSkipped": (
+            sentinel_duplicate_candidates_skipped
+        ),
+        "landsatPlatformFilter": "Landsat 8/9 only",
         "sentinelYearSeasonTargetPerArea": len(YEARS) * len(SEASONS),
         "landsatYearTargetPerArea": len(YEARS),
         "rankingEffect": "none",
         "scoringEffect": "none",
-        "note": "Feasibility pilot only; labels remain proxies until QA gates pass.",
+        "note": (
+            "Feasibility pilot only; labels remain proxies until QA gates pass."
+        ),
     }
     (OUT / "P1_AUDIT.json").write_text(
         json.dumps(audit, ensure_ascii=False, indent=2) + "\n",
