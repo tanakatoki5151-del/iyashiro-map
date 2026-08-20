@@ -1,0 +1,156 @@
+name: ECOSCAPE F15 Publish Result
+
+on:
+  push:
+    branches:
+      - agent/ecoscape-green-quality-p1
+    paths:
+      - .github/workflows/ecoscape-green-quality-f15-publish-result.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish-result:
+    runs-on: ubuntu-latest
+    timeout-minutes: 260
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/ecoscape-green-quality-p1
+          fetch-depth: 0
+
+      - name: Wait for latest F15 workflow and download artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow='ecoscape-green-quality-f15-open-imagery.yml'
+          branch='agent/ecoscape-green-quality-p1'
+          run_id=''
+          for attempt in $(seq 1 120); do
+            candidate=$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow "$workflow" \
+              --branch "$branch" \
+              --limit 1 \
+              --json databaseId,status,conclusion \
+              --jq '.[0] // empty')
+            if [[ -n "$candidate" ]]; then
+              status=$(jq -r '.status' <<<"$candidate")
+              conclusion=$(jq -r '.conclusion // ""' <<<"$candidate")
+              run_id=$(jq -r '.databaseId' <<<"$candidate")
+              echo "F15 run=$run_id status=$status conclusion=$conclusion"
+              if [[ "$status" == 'completed' ]]; then
+                test "$conclusion" = 'success'
+                break
+              fi
+            fi
+            sleep 10
+          done
+          test -n "$run_id"
+          rm -rf /tmp/f15-result
+          mkdir -p /tmp/f15-result
+          gh run download "$run_id" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name ecoscape-green-quality-f15-open-imagery \
+            --dir /tmp/f15-result
+          echo "$run_id" > /tmp/f15-result/SOURCE_RUN_ID.txt
+          find /tmp/f15-result -type f -maxdepth 5 -print
+
+      - name: Normalize result and preserve only evidence metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          destination='research/ecoscape-green-quality/F15_OPEN_IMAGERY_RESULT'
+          rm -rf "$destination"
+          mkdir -p "$destination"
+          find /tmp/f15-result -type f -exec cp {} "$destination"/ \;
+          if find "$destination" -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) | grep -q .; then
+            echo 'Image bytes were found in the published result.'
+            exit 1
+          fi
+          python - <<'PY'
+          from __future__ import annotations
+          import json
+          from pathlib import Path
+
+          root=Path('research/ecoscape-green-quality/F15_OPEN_IMAGERY_RESULT')
+          def read(name):
+              paths=sorted(root.glob(name))
+              return json.loads(paths[0].read_text()) if paths else {}
+          coverage=read('*COVERAGE_AUDIT.json')
+          analysis=read('*ANALYSIS_AUDIT.json')
+          receipt=read('*RELEASE_RECEIPT.json')
+          run_path=root/'SOURCE_RUN_ID.txt'
+          summary={
+            'buildId':'ecoscape-open-imagery-f15-result-20260820',
+            'sourceRunId':int(run_path.read_text().strip()),
+            'googleImageryUsed':False,
+            'mapillaryTokenPresent':receipt.get('mapillaryTokenPresent',False),
+            'cases':coverage.get('cases'),
+            'candidateImages':coverage.get('candidateImages',0),
+            'selectedImages':coverage.get('selectedImages',0),
+            'casesReadyForAutomatedAnalysis':coverage.get('casesReadyForAutomatedAnalysis',0),
+            'commonsSelectedImages':coverage.get('commonsSelectedImages',0),
+            'mapillarySelectedImages':coverage.get('mapillarySelectedImages',0),
+            'analysisExecuted':bool(analysis),
+            'imagesAnalyzed':analysis.get('imagesAnalyzed',0),
+            'usableStreetImages':analysis.get('usableStreetImages',0),
+            'casesAnalyzed':analysis.get('casesAnalyzed',0),
+            'imageBytesIncludedInResult':0,
+            'rankingEffect':'none',
+            'scoringEffect':'none',
+            'candidateOverride':0,
+          }
+          if summary['casesAnalyzed']:
+              summary['releaseState']='OPEN_IMAGE_MODEL_PROXY_READY'
+              summary['nextGate']='CROSSCHECK_WITH_F11_AND_LICENSE_AUDIT'
+          elif summary['casesReadyForAutomatedAnalysis']:
+              summary['releaseState']='IMAGES_FOUND_ANALYSIS_NOT_USABLE'
+              summary['nextGate']='MODEL_OR_SCENE_SUITABILITY_REVIEW'
+          elif not summary['mapillaryTokenPresent']:
+              summary['releaseState']='WIKIMEDIA_INSUFFICIENT_MAPILLARY_TOKEN_ABSENT'
+              summary['nextGate']='ADD_MAPILLARY_ACCESS_TOKEN'
+          else:
+              summary['releaseState']='OPEN_IMAGE_COVERAGE_INSUFFICIENT'
+              summary['nextGate']='KEEP_MAINTENANCE_UNKNOWN'
+          (root/'F15_CANONICAL_RESULT.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\n')
+          report='\n'.join([
+            '# ECOSCAPE F15 automated open-imagery result','',
+            f"- Source run: `{summary['sourceRunId']}`",
+            f"- Cases: `{summary['cases']}`",
+            f"- Candidate images: `{summary['candidateImages']}`",
+            f"- Selected images: `{summary['selectedImages']}`",
+            f"- Cases ready: `{summary['casesReadyForAutomatedAnalysis']}`",
+            f"- Wikimedia selected: `{summary['commonsSelectedImages']}`",
+            f"- Mapillary selected: `{summary['mapillarySelectedImages']}`",
+            f"- Images analyzed: `{summary['imagesAnalyzed']}`",
+            f"- Usable street images: `{summary['usableStreetImages']}`",
+            f"- Cases analyzed: `{summary['casesAnalyzed']}`",
+            f"- Release state: `{summary['releaseState']}`",
+            f"- Next gate: `{summary['nextGate']}`",'',
+            'Google imagery was not fetched, stored, or analyzed.',
+            'No canonical ranking, score, or candidate state was changed.',''
+          ])
+          (root/'F15_RESULT_REPORT.md').write_text(report)
+          PY
+          cd "$destination"
+          find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+
+      - name: Commit result to research branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- research/ecoscape-green-quality/F15_OPEN_IMAGERY_RESULT
+          if git diff --cached --quiet; then
+            echo 'No result change.'
+            exit 0
+          fi
+          git commit -m 'Publish ECOSCAPE F15 open-imagery result [skip ci]'
+          git push origin HEAD:agent/ecoscape-green-quality-p1
