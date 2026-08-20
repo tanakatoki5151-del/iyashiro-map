@@ -8,6 +8,13 @@ on:
       - .github/workflows/ecoscape-v2-green-quality-top100.yml
       - research/ecoscape-ranking-v2/ECOSCAPE_V2_TOP100_TEMPORAL_QUEUE.csv
       - research/ecoscape-ranking-v2/f16_build_v2_top100.py
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/ecoscape-v2-green-quality-top100.yml
+      - research/ecoscape-ranking-v2/ECOSCAPE_V2_TOP100_TEMPORAL_QUEUE.csv
+      - research/ecoscape-ranking-v2/f16_build_v2_top100.py
   workflow_dispatch:
 
 permissions:
