@@ -1,0 +1,78 @@
+name: ECOSCAPE Green Quality P1 Micro Pilot
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecoscape-green-quality-micro-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  p1-micro-pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install geospatial runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            numpy==2.2.6 \
+            pandas==2.3.2 \
+            rasterio==1.4.3 \
+            pystac==1.13.0 \
+            pystac-client==0.9.0 \
+            planetary-computer==1.0.0
+
+      - name: Run period-specific multi-year vegetation and multi-summer heat pilot v3
+        env:
+          ECOSCAPE_P1_OUTPUT: ${{ github.workspace }}/research/ecoscape-green-quality/output-v3
+          ECOSCAPE_P1_AREAS_CSV: ${{ github.workspace }}/research/ecoscape-green-quality/P1_MICRO_PILOT_AREAS.csv
+          ECOSCAPE_P1_YEAR_START: '2019'
+          ECOSCAPE_P1_YEAR_END: '2026'
+          GDAL_HTTP_MAX_RETRY: '4'
+          GDAL_HTTP_RETRY_DELAY: '2'
+          CPL_VSIL_CURL_CACHE_SIZE: '20000000'
+        run: |
+          python research/ecoscape-green-quality/p1_temporal_runner_v3.py
+
+      - name: Validate independent-period coverage and sensor completeness
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('research/ecoscape-green-quality/output-v3/P1_AUDIT_V3.json')
+          audit = json.loads(p.read_text())
+          print(json.dumps(audit, indent=2, ensure_ascii=False))
+          assert audit['pilotAreas'] == 6
+          assert audit['sentinelSceneRows'] > 0
+          assert audit['landsatSceneRows'] > 0
+          assert audit['landsatThermalAssetMissingErrors'] == 0
+          assert audit['medianFullCoreCoverageRate'] >= 0.75
+          assert audit['rankingEffect'] == 'none'
+          assert audit['scoringEffect'] == 'none'
+          PY
+
+      - name: Package evidence
+        run: |
+          cd research/ecoscape-green-quality
+          cp P1_MICRO_PILOT_AREAS.csv output-v3/
+          cp p1_micro_pilot.py output-v3/
+          cp p1_temporal_runner_v3.py output-v3/
+          sha256sum output-v3/* | sort > output-v3/SHA256SUMS.txt
+          zip -r ECOSCAPE_GREEN_QUALITY_P1_MICRO_V3_20260819.zip output-v3
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ecoscape-green-quality-p1-micro-v3-20260819
+          path: research/ecoscape-green-quality/ECOSCAPE_GREEN_QUALITY_P1_MICRO_V3_20260819.zip
+          if-no-files-found: error
+          retention-days: 30

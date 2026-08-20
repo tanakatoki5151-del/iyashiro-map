@@ -1,0 +1,161 @@
+name: ECOSCAPE V2 Green Quality Top100
+
+on:
+  push:
+    branches:
+      - agent/ecoscape-ranking-v2-top100
+    paths:
+      - .github/workflows/ecoscape-v2-green-quality-top100.yml
+      - research/ecoscape-ranking-v2/ECOSCAPE_V2_TOP100_TEMPORAL_QUEUE.csv
+      - research/ecoscape-ranking-v2/f16_build_v2_top100.py
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/ecoscape-v2-green-quality-top100.yml
+      - research/ecoscape-ranking-v2/ECOSCAPE_V2_TOP100_TEMPORAL_QUEUE.csv
+      - research/ecoscape-ranking-v2/f16_build_v2_top100.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  V2_AREAS: ${{ github.workspace }}/research/ecoscape-ranking-v2/ECOSCAPE_V2_TOP100_TEMPORAL_QUEUE.csv
+
+jobs:
+  temporal-shards:
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [0,1,2,3,4,5,6,7,8,9]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install geospatial runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            numpy==2.2.6 pandas==2.3.2 rasterio==1.4.3 \
+            pystac==1.13.0 pystac-client==0.9.0 planetary-computer==1.0.0
+      - name: Run deterministic 10-area shard
+        env:
+          ECOSCAPE_P1_OUTPUT: ${{ github.workspace }}/research/ecoscape-ranking-v2/output-shard-${{ matrix.shard }}
+          ECOSCAPE_P1_AREAS_CSV: ${{ env.V2_AREAS }}
+          ECOSCAPE_P1_YEAR_START: "2019"
+          ECOSCAPE_P1_YEAR_END: "2026"
+          ECOSCAPE_P1_SHARD_INDEX: ${{ matrix.shard }}
+          ECOSCAPE_P1_SHARD_COUNT: "10"
+          GDAL_HTTP_MAX_RETRY: "5"
+          GDAL_HTTP_RETRY_DELAY: "3"
+          CPL_VSIL_CURL_CACHE_SIZE: "30000000"
+        run: python research/ecoscape-green-quality/p1_temporal_runner_v3.py
+      - name: Validate shard
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          p=Path(f"research/ecoscape-ranking-v2/output-shard-{os.environ['SHARD']}/P1_AUDIT_V3.json")
+          audit=json.loads(p.read_text())
+          print(json.dumps(audit,indent=2,ensure_ascii=False))
+          assert audit["pilotAreas"] == 10
+          assert audit["sentinelSceneRows"] > 0
+          assert audit["landsatSceneRows"] > 0
+          assert audit["landsatThermalAssetMissingErrors"] == 0
+          assert audit["rankingEffect"] == "none"
+          assert audit["scoringEffect"] == "none"
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ecoscape-v2-top100-shard-${{ matrix.shard }}
+          path: research/ecoscape-ranking-v2/output-shard-${{ matrix.shard }}
+          if-no-files-found: error
+          retention-days: 30
+
+  aggregate-and-rank:
+    needs: temporal-shards
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install numpy==2.2.6 pandas==2.3.2
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ecoscape-v2-top100-shard-*
+          path: /tmp/ecoscape-v2-shards
+      - name: Merge ten shards
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+          import csv, json, shutil
+          from pathlib import Path
+          root=Path("/tmp/ecoscape-v2-shards")
+          out=Path("research/ecoscape-ranking-v2/V2_TOP100_TEMPORAL_FINAL")
+          if out.exists(): shutil.rmtree(out)
+          out.mkdir(parents=True)
+          csv_names=[
+            "P1_SENTINEL_SCENES_V3.csv",
+            "P1_SENTINEL_PERIOD_COMPOSITES_V3.csv",
+            "P1_LANDSAT_SUMMER_SCENES_V3.csv",
+            "P1_LANDSAT_MULTI_SUMMER_COMPOSITES_V3.csv",
+            "P1_COVERAGE_SUMMARY_V3.csv",
+          ]
+          for name in csv_names:
+            inputs=sorted(root.rglob(name))
+            if len(inputs)!=10:
+              raise RuntimeError(f"{name}: expected 10 shards, got {len(inputs)}")
+            header=None; rows=[]
+            for path in inputs:
+              with path.open(newline="",encoding="utf-8-sig") as stream:
+                reader=csv.reader(stream); h=next(reader)
+                if header is None: header=h
+                elif h!=header: raise RuntimeError(f"header mismatch {path}")
+                rows.extend(reader)
+            with (out/name).open("w",newline="",encoding="utf-8-sig") as stream:
+              w=csv.writer(stream); w.writerow(header); w.writerows(rows)
+          errors=[]
+          for path in sorted(root.rglob("P1_ERRORS_V3.json")):
+            errors.extend(json.loads(path.read_text()))
+          (out/"P1_ERRORS_V3.json").write_text(json.dumps(errors,ensure_ascii=False,indent=2)+"\n")
+          PY
+      - name: Build temporal evidence profiles
+        run: |
+          python research/ecoscape-green-quality/f7_evidence_gate.py \
+            --sentinel research/ecoscape-ranking-v2/V2_TOP100_TEMPORAL_FINAL/P1_SENTINEL_PERIOD_COMPOSITES_V3.csv \
+            --landsat research/ecoscape-ranking-v2/V2_TOP100_TEMPORAL_FINAL/P1_LANDSAT_MULTI_SUMMER_COMPOSITES_V3.csv \
+            --coverage research/ecoscape-ranking-v2/V2_TOP100_TEMPORAL_FINAL/P1_COVERAGE_SUMMARY_V3.csv \
+            --pilots research/ecoscape-ranking-v2/ECOSCAPE_V2_TOP100_TEMPORAL_QUEUE.csv \
+            --output research/ecoscape-ranking-v2/V2_TOP100_TEMPORAL_FINAL/F7_TEMPORAL
+      - name: Build V2 ranking
+        run: |
+          python research/ecoscape-ranking-v2/f16_build_v2_top100.py \
+            --queue research/ecoscape-ranking-v2/ECOSCAPE_V2_TOP100_TEMPORAL_QUEUE.csv \
+            --profiles research/ecoscape-ranking-v2/V2_TOP100_TEMPORAL_FINAL/F7_TEMPORAL/F7_ZONE_EVIDENCE_PROFILES.csv \
+            --stability research/ecoscape-ranking-v2/V2_TOP100_TEMPORAL_FINAL/F7_TEMPORAL/F7_THRESHOLD_STABILITY.csv \
+            --output research/ecoscape-ranking-v2/V2_TOP100_RELEASE
+      - name: Add hashes and package
+        run: |
+          cd research/ecoscape-ranking-v2
+          find V2_TOP100_TEMPORAL_FINAL V2_TOP100_RELEASE -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          zip -r ECOSCAPE_V2_GREEN_QUALITY_TOP100_20260820.zip \
+            ECOSCAPE_V2_TOP100_TEMPORAL_QUEUE.csv \
+            f16_build_v2_top100.py \
+            V2_TOP100_TEMPORAL_FINAL \
+            V2_TOP100_RELEASE \
+            SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ecoscape-v2-green-quality-top100
+          path: research/ecoscape-ranking-v2/ECOSCAPE_V2_GREEN_QUALITY_TOP100_20260820.zip
+          if-no-files-found: error
+          retention-days: 30
