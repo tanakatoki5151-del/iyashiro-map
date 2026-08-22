@@ -8,6 +8,13 @@ on:
       - scripts/iyashiro_probe_portals.py
       - scripts/iyashiro_finalize_harvest.py
       - .github/workflows/iyashiro-official-closure-harvest.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/iyashiro_harvest_sources.py
+      - scripts/iyashiro_probe_portals.py
+      - scripts/iyashiro_finalize_harvest.py
+      - .github/workflows/iyashiro-official-closure-harvest.yml
   workflow_dispatch:
 
 permissions:
