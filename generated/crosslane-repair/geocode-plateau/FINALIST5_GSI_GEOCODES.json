@@ -1,0 +1,117 @@
+[
+  {
+    "caseId": "B10-01",
+    "address": "東京都目黒区東が丘2丁目4-21",
+    "status": "SUCCESS",
+    "lon": 139.665161,
+    "lat": 35.629269,
+    "title": "東京都目黒区東が丘二丁目４番２１号",
+    "sourceUrl": "https://msearch.gsi.go.jp/address-search/AddressSearch?q=%E6%9D%B1%E4%BA%AC%E9%83%BD%E7%9B%AE%E9%BB%92%E5%8C%BA%E6%9D%B1%E3%81%8C%E4%B8%982%E4%B8%81%E7%9B%AE4-21",
+    "rawFeature": {
+      "geometry": {
+        "coordinates": [
+          139.665161,
+          35.629269
+        ],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "addressCode": "",
+        "title": "東京都目黒区東が丘二丁目４番２１号"
+      }
+    }
+  },
+  {
+    "caseId": "B10-02",
+    "address": "東京都目黒区東が丘1丁目18-20",
+    "status": "SUCCESS",
+    "lon": 139.669434,
+    "lat": 35.626644,
+    "title": "東京都目黒区東が丘一丁目１８番２０号",
+    "sourceUrl": "https://msearch.gsi.go.jp/address-search/AddressSearch?q=%E6%9D%B1%E4%BA%AC%E9%83%BD%E7%9B%AE%E9%BB%92%E5%8C%BA%E6%9D%B1%E3%81%8C%E4%B8%981%E4%B8%81%E7%9B%AE18-20",
+    "rawFeature": {
+      "geometry": {
+        "coordinates": [
+          139.669434,
+          35.626644
+        ],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "addressCode": "",
+        "title": "東京都目黒区東が丘一丁目１８番２０号"
+      }
+    }
+  },
+  {
+    "caseId": "B10-04",
+    "address": "東京都大田区中馬込1丁目5-3",
+    "status": "SUCCESS",
+    "lon": 139.706665,
+    "lat": 35.597328,
+    "title": "東京都大田区中馬込一丁目５番３号",
+    "sourceUrl": "https://msearch.gsi.go.jp/address-search/AddressSearch?q=%E6%9D%B1%E4%BA%AC%E9%83%BD%E5%A4%A7%E7%94%B0%E5%8C%BA%E4%B8%AD%E9%A6%AC%E8%BE%BC1%E4%B8%81%E7%9B%AE5-3",
+    "rawFeature": {
+      "geometry": {
+        "coordinates": [
+          139.706665,
+          35.597328
+        ],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "addressCode": "",
+        "title": "東京都大田区中馬込一丁目５番３号"
+      }
+    }
+  },
+  {
+    "caseId": "B10-05",
+    "address": "東京都大田区中馬込1丁目5-21",
+    "status": "SUCCESS",
+    "lon": 139.706223,
+    "lat": 35.597134,
+    "title": "東京都大田区中馬込一丁目５番２１号",
+    "sourceUrl": "https://msearch.gsi.go.jp/address-search/AddressSearch?q=%E6%9D%B1%E4%BA%AC%E9%83%BD%E5%A4%A7%E7%94%B0%E5%8C%BA%E4%B8%AD%E9%A6%AC%E8%BE%BC1%E4%B8%81%E7%9B%AE5-21",
+    "rawFeature": {
+      "geometry": {
+        "coordinates": [
+          139.706223,
+          35.597134
+        ],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "addressCode": "",
+        "title": "東京都大田区中馬込一丁目５番２１号"
+      }
+    }
+  },
+  {
+    "caseId": "B10-07",
+    "address": "東京都目黒区柿の木坂3丁目5-8",
+    "status": "SUCCESS",
+    "lon": 139.674301,
+    "lat": 35.628101,
+    "title": "東京都目黒区柿の木坂三丁目５番８号",
+    "sourceUrl": "https://msearch.gsi.go.jp/address-search/AddressSearch?q=%E6%9D%B1%E4%BA%AC%E9%83%BD%E7%9B%AE%E9%BB%92%E5%8C%BA%E6%9F%BF%E3%81%AE%E6%9C%A8%E5%9D%823%E4%B8%81%E7%9B%AE5-8",
+    "rawFeature": {
+      "geometry": {
+        "coordinates": [
+          139.674301,
+          35.628101
+        ],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "addressCode": "",
+        "title": "東京都目黒区柿の木坂三丁目５番８号"
+      }
+    }
+  }
+]

@@ -1,0 +1,41 @@
+name: IYASHIRO crosslane repair persist
+
+on:
+  push:
+    branches: [iyashiro-crosslane-evidence-repair-20260822]
+    paths:
+      - .github/workflows/iyashiro-crosslane-repair-persist.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  geocode-plateau-persist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: iyashiro-crosslane-evidence-repair-20260822
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install requests
+      - run: python scripts/iyashiro_geocode_and_plateau_fetch.py
+      - name: Persist immutable source evidence
+        run: |
+          mkdir -p generated/crosslane-repair/geocode-plateau
+          cp -a output/crosslane_repair/. generated/crosslane-repair/geocode-plateau/
+          git config user.name "iyashiro-evidence-bot"
+          git config user.email "iyashiro-evidence-bot@users.noreply.github.com"
+          git add generated/crosslane-repair/geocode-plateau
+          git diff --cached --quiet || git commit -m "Persist finalist geocode and PLATEAU evidence"
+          git push origin HEAD:iyashiro-crosslane-evidence-repair-20260822
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iyashiro-crosslane-geocode-plateau-persist-20260822
+          path: output/crosslane_repair/
+          if-no-files-found: error
+          retention-days: 30
