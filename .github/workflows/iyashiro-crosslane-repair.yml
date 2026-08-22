@@ -1,0 +1,36 @@
+name: IYASHIRO crosslane evidence repair
+
+on:
+  push:
+    branches: [iyashiro-crosslane-evidence-repair-20260822]
+    paths:
+      - scripts/iyashiro_geocode_and_plateau_fetch.py
+      - .github/workflows/iyashiro-crosslane-repair.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  geocode-and-fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install requests
+      - run: python -m py_compile scripts/iyashiro_geocode_and_plateau_fetch.py
+      - run: python scripts/iyashiro_geocode_and_plateau_fetch.py
+      - if: always()
+        run: |
+          find output -type f -printf '%p\t%s bytes\n' | sort
+          cat output/crosslane_repair/GEOCODE_PLATEAU_FETCH_STATUS.json || true
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iyashiro-crosslane-geocode-plateau-20260822
+          path: output/crosslane_repair/
+          if-no-files-found: error
+          retention-days: 30
