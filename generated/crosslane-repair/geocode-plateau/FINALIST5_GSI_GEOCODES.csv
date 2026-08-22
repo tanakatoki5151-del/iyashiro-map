@@ -1,0 +1,6 @@
+﻿caseId,address,status,lon,lat,title,sourceUrl,error
+B10-01,東京都目黒区東が丘2丁目4-21,SUCCESS,139.665161,35.629269,東京都目黒区東が丘二丁目４番２１号,https://msearch.gsi.go.jp/address-search/AddressSearch?q=%E6%9D%B1%E4%BA%AC%E9%83%BD%E7%9B%AE%E9%BB%92%E5%8C%BA%E6%9D%B1%E3%81%8C%E4%B8%982%E4%B8%81%E7%9B%AE4-21,
+B10-02,東京都目黒区東が丘1丁目18-20,SUCCESS,139.669434,35.626644,東京都目黒区東が丘一丁目１８番２０号,https://msearch.gsi.go.jp/address-search/AddressSearch?q=%E6%9D%B1%E4%BA%AC%E9%83%BD%E7%9B%AE%E9%BB%92%E5%8C%BA%E6%9D%B1%E3%81%8C%E4%B8%981%E4%B8%81%E7%9B%AE18-20,
+B10-04,東京都大田区中馬込1丁目5-3,SUCCESS,139.706665,35.597328,東京都大田区中馬込一丁目５番３号,https://msearch.gsi.go.jp/address-search/AddressSearch?q=%E6%9D%B1%E4%BA%AC%E9%83%BD%E5%A4%A7%E7%94%B0%E5%8C%BA%E4%B8%AD%E9%A6%AC%E8%BE%BC1%E4%B8%81%E7%9B%AE5-3,
+B10-05,東京都大田区中馬込1丁目5-21,SUCCESS,139.706223,35.597134,東京都大田区中馬込一丁目５番２１号,https://msearch.gsi.go.jp/address-search/AddressSearch?q=%E6%9D%B1%E4%BA%AC%E9%83%BD%E5%A4%A7%E7%94%B0%E5%8C%BA%E4%B8%AD%E9%A6%AC%E8%BE%BC1%E4%B8%81%E7%9B%AE5-21,
+B10-07,東京都目黒区柿の木坂3丁目5-8,SUCCESS,139.674301,35.628101,東京都目黒区柿の木坂三丁目５番８号,https://msearch.gsi.go.jp/address-search/AddressSearch?q=%E6%9D%B1%E4%BA%AC%E9%83%BD%E7%9B%AE%E9%BB%92%E5%8C%BA%E6%9F%BF%E3%81%AE%E6%9C%A8%E5%9D%823%E4%B8%81%E7%9B%AE5-8,
