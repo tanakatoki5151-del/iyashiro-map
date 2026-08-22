@@ -6,6 +6,11 @@ on:
     paths:
       - scripts/iyashiro_geocode_and_plateau_fetch.py
       - .github/workflows/iyashiro-crosslane-repair.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/iyashiro_geocode_and_plateau_fetch.py
+      - .github/workflows/iyashiro-crosslane-repair.yml
   workflow_dispatch:
 
 permissions:
