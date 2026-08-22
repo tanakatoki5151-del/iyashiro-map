@@ -1,0 +1,65 @@
+name: IYASHIRO official data closure harvest
+
+on:
+  push:
+    branches: [iyashiro-official-data-closure-20260822]
+    paths:
+      - scripts/iyashiro_harvest_sources.py
+      - scripts/iyashiro_probe_portals.py
+      - scripts/iyashiro_finalize_harvest.py
+      - scripts/harvest_kanagawa_liquefaction.py
+      - .github/workflows/iyashiro-official-closure-harvest.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/iyashiro_harvest_sources.py
+      - scripts/iyashiro_probe_portals.py
+      - scripts/iyashiro_finalize_harvest.py
+      - scripts/harvest_kanagawa_liquefaction.py
+      - .github/workflows/iyashiro-official-closure-harvest.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  harvest-official-closure-inputs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install requests beautifulsoup4 geopandas pyogrio shapely pyproj pymupdf playwright
+          python -m playwright install --with-deps chromium
+      - name: Compile
+        run: python -m py_compile scripts/iyashiro_harvest_sources.py scripts/iyashiro_probe_portals.py scripts/iyashiro_finalize_harvest.py scripts/harvest_kanagawa_liquefaction.py
+      - name: Harvest official files
+        run: python scripts/iyashiro_harvest_sources.py
+      - name: Harvest Kanagawa 2025 liquefaction
+        run: python scripts/harvest_kanagawa_liquefaction.py
+      - name: Probe official map portals
+        if: always()
+        run: python scripts/iyashiro_probe_portals.py
+      - name: Finalize manifest
+        if: always()
+        run: python scripts/iyashiro_finalize_harvest.py
+      - name: Read back
+        if: always()
+        run: |
+          test -f output/SUMMARY.json && cat output/SUMMARY.json || true
+          test -f output/KANAGAWA_2025_LIQUEFACTION_STATUS.json && cat output/KANAGAWA_2025_LIQUEFACTION_STATUS.json || true
+          find output -type f -printf '%p\t%s bytes\n' | sort || true
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iyashiro-official-closure-inputs-20260822
+          path: output/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
