@@ -1,0 +1,531 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Iyashiro Integrated API",
+    "version": "3.1.0",
+    "description": "Canonical address/cell/property assessment API. Geocode route is inferred by the server, UNKNOWN is not safe, and hard gates are non-compensatory."
+  },
+  "servers": [{ "url": "/" }],
+  "paths": {
+    "/api/v3/releases": {
+      "get": {
+        "summary": "Get the verified current public evidence release identity",
+        "description": "Returns only the deployment's current release identity and readiness. Internal sources, pointers, coverage and policy are intentionally not exposed. A readiness failure returns 503.",
+        "responses": {
+          "200": {
+            "description": "Ready public release catalog",
+            "headers": {
+              "Cache-Control": { "schema": { "type": "string", "const": "no-store" } }
+            },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReleaseCatalog" } } }
+          },
+          "500": { "$ref": "#/components/responses/Error" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v3/resolve": {
+      "post": {
+        "summary": "Resolve an address or coordinate to uncertainty-weighted canonical cells",
+        "description": "The server infers the geocode route and minimum sigma from supplied evidence. Runtime readiness failure returns 503 and is never converted to out-of-scope.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ResolveInput" } } }
+        },
+        "responses": {
+          "200": { "description": "Canonical resolution", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Resolution" } } } },
+          "400": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "413": { "$ref": "#/components/responses/Error" },
+          "415": { "$ref": "#/components/responses/Error" },
+          "422": { "$ref": "#/components/responses/Error" },
+          "500": { "$ref": "#/components/responses/Error" },
+          "502": { "$ref": "#/components/responses/Error" },
+          "503": { "$ref": "#/components/responses/Error" },
+          "504": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v3/cells/{cellId}/profile": {
+      "get": {
+        "summary": "Get an integrated Fact Envelope profile",
+        "parameters": [{
+          "name": "cellId",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "pattern": "^g[0-9]{1,3}-[0-9]{1,3}$" }
+        }],
+        "responses": {
+          "200": { "description": "Integrated cell profile", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CellProfile" } } } },
+          "400": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "500": { "$ref": "#/components/responses/Error" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v3/properties/intake": {
+      "get": {
+        "summary": "List intake capabilities",
+        "responses": { "200": { "description": "Capabilities" } }
+      },
+      "post": {
+        "summary": "Extract one user-supplied allowlisted property page with manual fallback",
+        "description": "Only exact-allowlisted HTTPS pages are fetched. URL credentials, fragments and non-standard ports are rejected. Fetch, DNS, redirect, size and timeout failures return a 200 manual fallback instead of a guessed property.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PropertyInput" } } }
+        },
+        "responses": {
+          "200": { "description": "Property intake result or explicit manual fallback" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "413": { "$ref": "#/components/responses/Error" },
+          "415": { "$ref": "#/components/responses/Error" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v3/assess": {
+      "post": {
+        "summary": "Intake, resolve, profile and apply fixed R3 policy",
+        "description": "A configured comparison secret adds a current-release-bound compact comparison token with a 24-hour lifetime and a signed legacy snapshot signature.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AssessmentInput" } } }
+        },
+        "responses": {
+          "200": { "description": "Assessment", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Assessment" } } } },
+          "400": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "413": { "$ref": "#/components/responses/Error" },
+          "415": { "$ref": "#/components/responses/Error" },
+          "422": { "$ref": "#/components/responses/Error" },
+          "500": { "$ref": "#/components/responses/Error" },
+          "502": { "$ref": "#/components/responses/Error" },
+          "503": { "$ref": "#/components/responses/Error" },
+          "504": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v3/compare": {
+      "post": {
+        "summary": "Compare 2 to 20 candidates without AI scoring",
+        "description": "Exactly one of tokens, snapshots, assessments, or candidates is accepted. Compact tokens are recommended and checked for HMAC integrity, 24-hour expiry, the current evidence release and shared policy without refetching. Legacy full snapshots are limited to 2-3. Live candidates are processed with at most 8 workers. Candidate-level errors remain explicit in a 200 response failures array.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ComparisonInput" } } }
+        },
+        "responses": {
+          "200": { "description": "Comparison, including explicit partial failures", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Comparison" } } } },
+          "400": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" },
+          "413": { "$ref": "#/components/responses/Error" },
+          "415": { "$ref": "#/components/responses/Error" },
+          "500": { "$ref": "#/components/responses/Error" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v3/house-compass": {
+      "post": {
+        "summary": "Run the bounded HCL engine",
+        "description": "Directions are strings (eight-point labels or a string containing 0-359 degrees), never JSON numbers. No aggregate score, majority vote, health prediction or wealth prediction is produced.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HclInput" } } }
+        },
+        "responses": {
+          "200": { "description": "HCL report" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "413": { "$ref": "#/components/responses/Error" },
+          "415": { "$ref": "#/components/responses/Error" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    }
+  },
+  "components": {
+    "responses": {
+      "Error": {
+        "description": "Structured error",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": ["error", "message"],
+        "properties": {
+          "error": { "type": "string" },
+          "message": { "type": "string" },
+          "details": {}
+        }
+      },
+      "ReleaseReadiness": {
+        "type": "object",
+        "required": ["status", "manifestValidated"],
+        "properties": {
+          "status": { "const": "ready" },
+          "manifestValidated": { "const": true }
+        },
+        "additionalProperties": false
+      },
+      "ReleaseCatalogCurrent": {
+        "type": "object",
+        "required": ["evidence", "generatedAt", "sourceSchemaVersion"],
+        "properties": {
+          "evidence": { "$ref": "#/components/schemas/EvidenceRelease" },
+          "generatedAt": { "type": ["string", "null"], "format": "date" },
+          "sourceSchemaVersion": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      },
+      "ReleaseCatalog": {
+        "type": "object",
+        "required": ["schemaVersion", "checkedAt", "readiness", "current"],
+        "properties": {
+          "schemaVersion": { "const": "iyashiro-release-catalog/1.0" },
+          "checkedAt": { "type": "string", "format": "date-time" },
+          "readiness": { "$ref": "#/components/schemas/ReleaseReadiness" },
+          "current": { "$ref": "#/components/schemas/ReleaseCatalogCurrent" }
+        },
+        "additionalProperties": false
+      },
+      "ResolveInput": {
+        "type": "object",
+        "description": "Client-supplied geocode route is not accepted as evidence. The server infers it from address, coordinate, or property-page origin.",
+        "properties": {
+          "address": { "type": "string", "minLength": 2, "maxLength": 120 },
+          "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+          "lon": { "type": "number", "minimum": -180, "maximum": 180 },
+          "sigmaM": { "type": "number", "minimum": 1, "maximum": 500, "description": "May expand but never reduce the server-inferred evidence floor." }
+        },
+        "anyOf": [
+          { "required": ["address"] },
+          { "required": ["lat", "lon"] }
+        ]
+      },
+      "WeightedCell": {
+        "type": "object",
+        "required": ["cellId", "row", "col", "weight", "centerDistanceM", "valid"],
+        "properties": {
+          "cellId": { "type": "string" },
+          "row": { "type": "integer", "minimum": 0, "maximum": 623 },
+          "col": { "type": "integer", "minimum": 0, "maximum": 461 },
+          "weight": { "type": "number", "minimum": 0, "maximum": 1 },
+          "centerDistanceM": { "type": "number", "minimum": 0 },
+          "valid": { "const": true }
+        }
+      },
+      "Resolution": {
+        "type": "object",
+        "required": ["schemaVersion", "query", "matchedAddress", "geocodeRoute", "sigmaM", "consistency", "primaryCellId", "cells", "coverage"],
+        "properties": {
+          "schemaVersion": { "const": "canonical-resolution/2.0" },
+          "query": { "type": "object", "additionalProperties": true },
+          "matchedAddress": { "type": ["string", "null"] },
+          "geocodeRoute": { "type": "string", "enum": ["GSI_JUKYO_BASE_NUMBER", "USER_COORDINATE", "PROPERTY_PAGE_ADDRESS"] },
+          "sigmaM": { "type": "number", "minimum": 1, "maximum": 500 },
+          "consistency": { "type": "object", "additionalProperties": true },
+          "primaryCellId": { "type": ["string", "null"] },
+          "cells": { "type": "array", "maxItems": 25, "items": { "$ref": "#/components/schemas/WeightedCell" } },
+          "coverage": {
+            "type": "object",
+            "required": ["status", "coveredWeight", "returnedTheoreticalWeight", "rejectedWeight", "omittedWeight", "note"],
+            "properties": {
+              "status": { "type": "string", "enum": ["VALIDATED", "PARTIAL", "NO_VALID_CELL", "RUNTIME_UNAVAILABLE"] },
+              "coveredWeight": { "type": "number", "minimum": 0, "maximum": 1 },
+              "returnedTheoreticalWeight": { "type": "number", "minimum": 0, "maximum": 1 },
+              "rejectedWeight": { "type": "number", "minimum": 0, "maximum": 1 },
+              "omittedWeight": { "type": "number", "minimum": 0, "maximum": 1 },
+              "note": { "type": "string" }
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "Policy": {
+        "type": "object",
+        "properties": {
+          "distanceThresholdM": { "type": "integer", "enum": [300, 500, 650], "default": 500 },
+          "includeShrines": { "type": "boolean", "default": false }
+        }
+      },
+      "AppliedPolicy": {
+        "type": "object",
+        "required": ["id", "distanceThresholdM", "includeShrines", "hardGateNonCompensatory", "unknownDisposition"],
+        "properties": {
+          "id": { "const": "R3_DEFAULT" },
+          "distanceThresholdM": { "type": "integer", "enum": [300, 500, 650] },
+          "includeShrines": { "type": "boolean" },
+          "hardGateNonCompensatory": { "const": true },
+          "unknownDisposition": { "const": "review" }
+        }
+      },
+      "ManualProperty": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "maxLength": 200 },
+          "address": { "type": "string", "maxLength": 160 },
+          "station": { "type": "string", "maxLength": 120 },
+          "areaM2": { "type": ["number", "string"] },
+          "layout": { "type": "string", "maxLength": 40 },
+          "memo": { "type": "string", "maxLength": 1000 }
+        }
+      },
+      "PropertyInput": {
+        "type": "object",
+        "properties": {
+          "propertyUrl": { "type": "string", "format": "uri", "maxLength": 2048, "description": "Automatic fetch requires an exact-allowlisted HTTPS host. URL credentials and fragments are rejected before reflection." },
+          "manual": { "$ref": "#/components/schemas/ManualProperty" }
+        }
+      },
+      "HclInput": {
+        "type": "object",
+        "description": "All direction fields are strings: an eight-point label or a string containing 0-359 degrees. JSON numbers are rejected. form is the existing bounded full-form input and also keeps bearing fields as strings.",
+        "properties": {
+          "entranceDirection": { "type": "string" },
+          "sharedEntranceDirection": { "type": "string" },
+          "facingDirection": { "type": "string" },
+          "bedroomDirection": { "type": "string", "maxLength": 40 },
+          "workDeskDirection": { "type": "string", "maxLength": 40 },
+          "kitchenDirection": { "type": "string" },
+          "headDirection": { "type": "string", "maxLength": 40 },
+          "buildingAgeBand": { "type": "string", "maxLength": 80 },
+          "centerKnown": { "type": "boolean" },
+          "concerns": {
+            "oneOf": [
+              { "type": "string", "maxLength": 200 },
+              { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 200 } }
+            ]
+          },
+          "form": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "AssessmentInput": {
+        "type": "object",
+        "properties": {
+          "clientCandidateId": { "type": "string", "maxLength": 120 },
+          "propertyUrl": { "type": "string", "format": "uri", "maxLength": 2048 },
+          "manual": { "$ref": "#/components/schemas/ManualProperty" },
+          "address": { "type": "string", "minLength": 2, "maxLength": 120 },
+          "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+          "lon": { "type": "number", "minimum": -180, "maximum": 180 },
+          "sigmaM": { "type": "number", "minimum": 1, "maximum": 500 },
+          "policy": { "$ref": "#/components/schemas/Policy" },
+          "hcl": { "$ref": "#/components/schemas/HclInput" }
+        },
+        "anyOf": [
+          { "required": ["propertyUrl"] },
+          { "required": ["address"] },
+          { "required": ["lat", "lon"] },
+          { "required": ["manual"] }
+        ]
+      },
+      "FactEnvelope": {
+        "type": "object",
+        "required": ["schemaVersion", "factId", "layer", "subject", "release", "sources", "coverage", "finding", "policy"],
+        "properties": {
+          "schemaVersion": { "const": "fact-envelope/1.0" },
+          "factId": { "type": "string", "enum": ["temple", "cemetery", "large_hospital", "strong_history", "p8", "shrine", "general_hospital"] },
+          "layer": { "type": "string" },
+          "subject": { "type": "object", "additionalProperties": true },
+          "release": { "type": "object", "additionalProperties": true },
+          "sources": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+          "coverage": { "type": "object", "additionalProperties": true },
+          "finding": { "type": "object", "additionalProperties": true },
+          "policy": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "CellProfile": {
+        "type": "object",
+        "required": ["schemaVersion", "generatedAt", "cell", "release", "coverage", "layers", "rankings", "facts"],
+        "properties": {
+          "schemaVersion": { "const": "integrated-cell-profile/3.0" },
+          "generatedAt": { "type": "string", "format": "date-time" },
+          "cell": { "type": "object", "additionalProperties": true },
+          "release": { "type": "object", "additionalProperties": true },
+          "coverage": { "type": "object", "additionalProperties": true },
+          "layers": { "type": "object", "additionalProperties": true },
+          "rankings": { "type": "object", "additionalProperties": true },
+          "facts": { "type": "array", "items": { "$ref": "#/components/schemas/FactEnvelope" } }
+        }
+      },
+      "EvidenceRelease": {
+        "type": "object",
+        "required": ["releaseId", "sha256", "dataContract"],
+        "properties": {
+          "releaseId": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "dataContract": { "const": "integrated-cell-profile/3.0" }
+        }
+      },
+      "GateFinding": {
+        "type": "object",
+        "required": ["factor", "cellId", "distanceM", "thresholdM", "reason"],
+        "properties": {
+          "factor": { "type": "string" },
+          "cellId": { "type": ["string", "null"] },
+          "distanceM": { "type": ["number", "null"] },
+          "thresholdM": { "type": "number" },
+          "affectedCellCount": { "type": "integer", "minimum": 0 },
+          "evaluatedCellCount": { "type": "integer", "minimum": 0 },
+          "affectedWeight": { "type": "number", "minimum": 0 },
+          "reason": { "type": "string" }
+        }
+      },
+      "AssessmentDecision": {
+        "type": "object",
+        "required": ["status", "eligible", "hardVeto", "hardGates", "reviews", "summary"],
+        "properties": {
+          "status": { "type": "string", "enum": ["pass", "hard_veto", "review", "out_of_scope"] },
+          "eligible": { "type": "boolean" },
+          "hardVeto": { "type": "boolean" },
+          "hardGates": { "type": "array", "items": { "$ref": "#/components/schemas/GateFinding" } },
+          "reviews": { "type": "array", "items": { "$ref": "#/components/schemas/GateFinding" } },
+          "summary": { "type": "string" }
+        }
+      },
+      "Assessment": {
+        "type": "object",
+        "required": ["schemaVersion", "candidateId", "generatedAt", "evidenceRelease", "property", "resolution", "profile", "candidateCellProfiles", "policy", "decision", "houseCompass", "comparisonToken", "snapshotSignature", "disclaimer"],
+        "properties": {
+          "schemaVersion": { "const": "iyashiro-assessment/3.0" },
+          "candidateId": { "type": "string" },
+          "clientCandidateId": { "type": ["string", "null"] },
+          "candidateOrdinal": { "type": ["integer", "null"] },
+          "generatedAt": { "type": "string", "format": "date-time" },
+          "evidenceRelease": { "$ref": "#/components/schemas/EvidenceRelease" },
+          "property": { "type": "object", "additionalProperties": true },
+          "resolution": { "$ref": "#/components/schemas/Resolution" },
+          "profile": { "oneOf": [{ "$ref": "#/components/schemas/CellProfile" }, { "type": "null" }] },
+          "candidateCellProfiles": { "type": "array", "maxItems": 25, "items": { "type": "object", "additionalProperties": true } },
+          "policy": { "$ref": "#/components/schemas/AppliedPolicy" },
+          "decision": { "$ref": "#/components/schemas/AssessmentDecision" },
+          "houseCompass": { "type": ["object", "null"], "additionalProperties": true },
+          "comparisonToken": { "type": ["string", "null"], "maxLength": 32837, "description": "Signed, not encrypted. Version 1.1, 24-hour lifetime, current release only, 24 KiB payload. Contains no URL, memo, HCL, coordinates, profile facts or disclaimer." },
+          "snapshotSignature": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+          "disclaimer": { "type": "string" }
+        }
+      },
+      "LegacyAssessmentSnapshot": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Assessment" },
+          { "type": "object", "required": ["snapshotSignature"], "properties": { "snapshotSignature": { "type": "string", "pattern": "^[a-f0-9]{64}$" } } }
+        ]
+      },
+      "ComparisonInput": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/TokenComparisonInput" },
+          { "$ref": "#/components/schemas/SnapshotComparisonInput" },
+          { "$ref": "#/components/schemas/AssessmentAliasComparisonInput" },
+          { "$ref": "#/components/schemas/LiveComparisonInput" }
+        ]
+      },
+      "TokenComparisonInput": {
+        "type": "object",
+        "required": ["tokens", "policy"],
+        "properties": {
+          "tokens": { "type": "array", "minItems": 2, "maxItems": 20, "items": { "type": "string", "maxLength": 32837 } },
+          "policy": { "$ref": "#/components/schemas/Policy" }
+        },
+        "additionalProperties": false
+      },
+      "SnapshotComparisonInput": {
+        "type": "object",
+        "required": ["snapshots"],
+        "properties": {
+          "snapshots": { "type": "array", "minItems": 2, "maxItems": 3, "items": { "$ref": "#/components/schemas/LegacyAssessmentSnapshot" } },
+          "policy": { "$ref": "#/components/schemas/Policy" }
+        },
+        "additionalProperties": false
+      },
+      "AssessmentAliasComparisonInput": {
+        "type": "object",
+        "required": ["assessments"],
+        "properties": {
+          "assessments": { "type": "array", "minItems": 2, "maxItems": 3, "items": { "$ref": "#/components/schemas/LegacyAssessmentSnapshot" } },
+          "policy": { "$ref": "#/components/schemas/Policy" }
+        },
+        "additionalProperties": false
+      },
+      "LiveComparisonInput": {
+        "type": "object",
+        "required": ["candidates"],
+        "properties": {
+          "candidates": { "type": "array", "minItems": 2, "maxItems": 20, "items": { "$ref": "#/components/schemas/AssessmentInput" } },
+          "policy": { "$ref": "#/components/schemas/Policy" }
+        },
+        "additionalProperties": false
+      },
+      "ComparisonFailure": {
+        "type": "object",
+        "required": ["candidateOrdinal", "clientCandidateId", "error", "status", "message"],
+        "properties": {
+          "candidateOrdinal": { "type": "integer", "minimum": 0 },
+          "clientCandidateId": { "type": ["string", "null"] },
+          "error": { "type": "string" },
+          "status": { "type": "integer", "minimum": 400, "maximum": 599 },
+          "message": { "type": "string" }
+        }
+      },
+      "ComparisonResult": {
+        "type": "object",
+        "required": ["schemaVersion", "candidateId", "generatedAt", "evidenceRelease", "property", "resolution", "profile", "policy", "decision", "houseCompass", "candidateCells"],
+        "properties": {
+          "schemaVersion": { "const": "iyashiro-assessment/3.0" },
+          "candidateId": { "type": "string" },
+          "sourceCandidateId": { "type": ["string", "null"] },
+          "clientCandidateId": { "type": ["string", "null"] },
+          "candidateOrdinal": { "type": ["integer", "null"] },
+          "generatedAt": { "type": "string", "format": "date-time" },
+          "evidenceRelease": { "$ref": "#/components/schemas/EvidenceRelease" },
+          "property": { "type": "object", "required": ["name", "address"], "properties": { "name": { "type": ["string", "null"] }, "address": { "type": ["string", "null"] } }, "additionalProperties": false },
+          "resolution": { "type": "object", "required": ["primaryCellId", "coverage"], "properties": { "primaryCellId": { "type": ["string", "null"] }, "coverage": { "type": "object", "additionalProperties": true } }, "additionalProperties": false },
+          "profile": { "type": "null" },
+          "policy": { "$ref": "#/components/schemas/AppliedPolicy" },
+          "decision": { "$ref": "#/components/schemas/AssessmentDecision" },
+          "houseCompass": { "type": "null" },
+          "disclaimer": { "type": "string" },
+          "candidateCells": {
+            "type": "array",
+            "maxItems": 25,
+            "items": {
+              "type": "object",
+              "required": ["cellId", "weight", "profileAvailable", "profileIncludedInResponse"],
+              "properties": {
+                "cellId": { "type": "string" },
+                "weight": { "type": "number" },
+                "profileAvailable": { "type": "boolean" },
+                "profileIncludedInResponse": { "const": false }
+              }
+            }
+          }
+        }
+      },
+      "Comparison": {
+        "type": "object",
+        "required": ["schemaVersion", "generatedAt", "mode", "policy", "evidenceRelease", "requestedCount", "completedCount", "failedCount", "results", "failures", "ordering", "notes"],
+        "properties": {
+          "schemaVersion": { "const": "iyashiro-comparison/3.0" },
+          "generatedAt": { "type": "string", "format": "date-time" },
+          "mode": { "type": "string", "enum": ["comparison_tokens", "assessment_snapshots", "live_inputs"] },
+          "policy": { "$ref": "#/components/schemas/AppliedPolicy" },
+          "evidenceRelease": { "oneOf": [{ "$ref": "#/components/schemas/EvidenceRelease" }, { "type": "null" }] },
+          "requestedCount": { "type": "integer", "minimum": 2, "maximum": 20 },
+          "completedCount": { "type": "integer", "minimum": 0, "maximum": 20 },
+          "failedCount": { "type": "integer", "minimum": 0, "maximum": 20 },
+          "results": { "type": "array", "items": { "$ref": "#/components/schemas/ComparisonResult" } },
+          "failures": { "type": "array", "items": { "$ref": "#/components/schemas/ComparisonFailure" } },
+          "ordering": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+          "notes": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

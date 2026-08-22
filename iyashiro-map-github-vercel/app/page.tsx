@@ -31,6 +31,7 @@ export default function Home() {
           gap: 8,
         }}
       >
+        <Link href="/integrated" style={linkStyle}>統合コパイロット ✦</Link>
         <Link href="/nexus" style={linkStyle}>NEXUS 物件判定 🧬</Link>
         <Link href="/profile" style={linkStyle}>土地カルテ 🗺️</Link>
       </nav>

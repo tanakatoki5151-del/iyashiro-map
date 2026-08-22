@@ -3,6 +3,23 @@
 東京23区・横浜市・川崎市を対象に、イヤシロ仮説と現代的な土地リスクを
 別々に可視化し、住所または地図上の地点を診断する個人用マップです。
 
+## Integrated decision copilot
+
+The release candidate adds `/integrated`, a single evidence-first surface for area research and property comparison.
+It keeps empirical risk, research proxies, traditional lenses, and missing evidence visibly separate.
+
+- Runtime pack: 120,662 canonical 100 m cells across Tokyo 23 wards, Yokohama, and Kawasaki.
+- Inputs: address, coordinates, an allowlisted property URL, and explicit manual corrections.
+- Policy: 300 / 500 / 650 m thresholds, 500 m default, shrines opt-in, hard vetoes non-compensatory.
+- Lenses: R3, V15.3, RYUMYAK, ORBIT, history/P8, and bounded HOUSE COMPASS LAB context.
+- Failure semantics: UNKNOWN, PARTIAL, unavailable, and out-of-scope are never presented as safe.
+- Comparison: up to 20 candidates using short-lived, current-release-bound signed tokens without raw HCL or listing PII.
+
+Contracts and operations are documented in `docs/INTEGRATED_API_V3.md`, `docs/INTEGRATED_API_DATA_CONTRACT.md`, and `public/openapi-v3.json`.
+
+This branch does not promote the production alias. Production comparison signing requires `IYASHIRO_COMPARE_SNAPSHOT_SECRET` of at least 32 bytes.
+Protected Vercel previews may use the documented deployment-scoped HKDF fallback; all other missing-key cases fail closed.
+
 ## Map layers
 
 - 地図を開くと、クオレガ東京本社4.5km圏の6,361区画に加え、田園都市線の

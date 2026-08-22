@@ -69,6 +69,7 @@ export default function DiscoveryClient() {
     }
   }, [municipality, stratum]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- async initial load owns its loading state
   useEffect(() => { void load(); }, [load]);
 
   return <main style={{ minHeight: "100vh", background: "#f4f1e9", color: "#201f1b", fontFamily: '-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif' }}>

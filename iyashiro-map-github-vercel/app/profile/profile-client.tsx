@@ -72,6 +72,7 @@ export default function ProfileClient() {
   useEffect(() => {
     const q = new URLSearchParams(window.location.search).get("q");
     const initial = q?.trim() || query;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- URL query initializes the controlled field after hydration
     if (q) setQuery(q);
     void run(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps

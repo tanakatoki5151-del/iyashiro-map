@@ -33,7 +33,7 @@ export default function NexusClientV3() {
   async function submit(e: FormEvent) {
     e.preventDefault(); setLoading(true); setError(null); setProfile(null);
     try {
-      let town = form.town.trim();
+      const town = form.town.trim();
       if (form.address.trim()) {
         const p = await fetch(`/api/profile?q=${encodeURIComponent(form.address.trim())}`);
         if (p.ok) {

@@ -1,0 +1,12 @@
+desktop.ini
+**/desktop.ini
+__quarantine__/
+**/node_modules/
+**/.next/
+**/dist/
+**/.sites-runtime/
+**/.wrangler/
+**/*.log
+**/.env
+**/.env.*
+!**/.env.example
