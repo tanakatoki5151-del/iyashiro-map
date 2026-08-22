@@ -7,6 +7,7 @@ on:
       - scripts/iyashiro_harvest_sources.py
       - scripts/iyashiro_probe_portals.py
       - scripts/iyashiro_finalize_harvest.py
+      - scripts/harvest_kanagawa_liquefaction.py
       - .github/workflows/iyashiro-official-closure-harvest.yml
   pull_request:
     branches: [main]
@@ -14,6 +15,7 @@ on:
       - scripts/iyashiro_harvest_sources.py
       - scripts/iyashiro_probe_portals.py
       - scripts/iyashiro_finalize_harvest.py
+      - scripts/harvest_kanagawa_liquefaction.py
       - .github/workflows/iyashiro-official-closure-harvest.yml
   workflow_dispatch:
 
@@ -35,9 +37,11 @@ jobs:
           python -m pip install requests beautifulsoup4 geopandas pyogrio shapely pyproj pymupdf playwright
           python -m playwright install --with-deps chromium
       - name: Compile
-        run: python -m py_compile scripts/iyashiro_harvest_sources.py scripts/iyashiro_probe_portals.py scripts/iyashiro_finalize_harvest.py
+        run: python -m py_compile scripts/iyashiro_harvest_sources.py scripts/iyashiro_probe_portals.py scripts/iyashiro_finalize_harvest.py scripts/harvest_kanagawa_liquefaction.py
       - name: Harvest official files
         run: python scripts/iyashiro_harvest_sources.py
+      - name: Harvest Kanagawa 2025 liquefaction
+        run: python scripts/harvest_kanagawa_liquefaction.py
       - name: Probe official map portals
         if: always()
         run: python scripts/iyashiro_probe_portals.py
@@ -48,6 +52,7 @@ jobs:
         if: always()
         run: |
           test -f output/SUMMARY.json && cat output/SUMMARY.json || true
+          test -f output/KANAGAWA_2025_LIQUEFACTION_STATUS.json && cat output/KANAGAWA_2025_LIQUEFACTION_STATUS.json || true
           find output -type f -printf '%p\t%s bytes\n' | sort || true
       - name: Upload artifact
         if: always()
