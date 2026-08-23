@@ -18,6 +18,7 @@ import {
 } from "./lib/grid-presentation";
 
 type Mode = "theory" | "modern" | "combined";
+type SheetLevel = "peek" | "half" | "full";
 type Candidate = { label: string; lat: number; lng: number };
 type DossierTarget =
   | { kind: "point"; lat: number; lng: number; label?: string }
@@ -74,10 +75,10 @@ type PrecomputedGrid = {
   cells: PrecomputedGridCell[];
 };
 
-const MODES: Array<{ key: Mode; label: string }> = [
-  { key: "theory", label: "従来地形仮説（比較）" },
-  { key: "modern", label: "公的リスク地図" },
-  { key: "combined", label: "従来地形比較＋公的リスク" },
+const MODES: Array<{ key: Mode; label: string; shortLabel: string }> = [
+  { key: "theory", label: "従来地形仮説（比較）", shortLabel: "地形の比較" },
+  { key: "modern", label: "公的リスク地図", shortLabel: "公的リスク" },
+  { key: "combined", label: "従来地形比較＋公的リスク", shortLabel: "重ねて見る" },
 ];
 const LEGACY_COMPARISON_ENGINE = "directional-line-crossing-v2";
 const HAZARDS = [
@@ -143,6 +144,7 @@ const REVIEW_CELL_COLOR = "#8b928f";
 export default function MapApp() {
   const nodeRef = useRef<HTMLDivElement | null>(null);
   const dossierSheetRef = useRef<HTMLElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const mapRef = useRef<Leaflet.Map | null>(null);
   const leafletRef = useRef<typeof Leaflet | null>(null);
   const markerRef = useRef<Leaflet.Marker | null>(null);
@@ -176,13 +178,32 @@ export default function MapApp() {
   );
   const [layersOpen, setLayersOpen] = useState(false);
   const [legendOpen, setLegendOpen] = useState(false);
+  const [sheetLevel, setSheetLevel] = useState<SheetLevel>("half");
   const [infoOpen, setInfoOpen] = useState(false);
   const [activeHazards, setActiveHazards] = useState<string[]>([]);
+
+  const closeDossier = useCallback(() => {
+    dossierRequestId.current += 1;
+    dossierAbort.current?.abort();
+    setLoadingDossier(false);
+    setDossier(null);
+    setError(null);
+    window.requestAnimationFrame(() => searchInputRef.current?.focus());
+  }, []);
 
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
 
+
+  useEffect(() => {
+    dossierSheetRef.current?.scrollTo({ top: 0, behavior: "auto" });
+  }, [
+    sheetLevel,
+    loadingDossier,
+    dossier?.location.lat,
+    dossier?.location.lng,
+  ]);
   useEffect(() => {
     const controller = new AbortController();
     void Promise.all(
@@ -283,6 +304,7 @@ export default function MapApp() {
       dossierAbort.current?.abort();
       const controller = new AbortController();
       dossierAbort.current = controller;
+      setSheetLevel("half");
       setLoadingDossier(true);
       try {
         const response = await fetch(
@@ -775,6 +797,7 @@ export default function MapApp() {
     dossierAbort.current?.abort();
     setDossier(null);
     setError(null);
+    setSheetLevel("half");
     setLoadingDossier(true);
     navigator.geolocation.getCurrentPosition(
       (position) => {
@@ -797,14 +820,42 @@ export default function MapApp() {
     () => MODES.find((entry) => entry.key === mode) ?? MODES[0],
     [mode],
   );
+  const dossierOpen = loadingDossier || Boolean(dossier) || Boolean(error);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const frame = window.requestAnimationFrame(() =>
+      map.invalidateSize({ pan: false }),
+    );
+    const timer = window.setTimeout(
+      () => map.invalidateSize({ pan: false }),
+      280,
+    );
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [dossierOpen]);
+
+  useEffect(() => {
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (infoOpen) setInfoOpen(false);
+      else if (dossierOpen) closeDossier();
+    };
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [closeDossier, dossierOpen, infoOpen]);
+
 
   return (
-    <main className="map-app">
+    <main className={`map-app${dossierOpen ? " map-app--dossier-open" : ""}`}>
       <header className="top-shell">
         <div className="brand-row">
           <div>
             <p className="eyebrow">東京23区・横浜市・川崎市</p>
-            <h1>地図から、土地情報を全部見る。</h1>
+            <h1>土地を選んで、結論から見る。</h1>
           </div>
           <button
             className="round-button"
@@ -812,12 +863,18 @@ export default function MapApp() {
             aria-label="使い方と判定方法"
             onClick={() => setInfoOpen(true)}
           >
-            i
+            ?
           </button>
         </div>
         <form className="search-box" data-testid="location-search" onSubmit={submitSearch}>
-          <span aria-hidden="true">⌕</span>
+          <span className="search-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <circle cx="10.5" cy="10.5" r="6.5" />
+              <path d="m15.5 15.5 5 5" />
+            </svg>
+          </span>
           <input
+            ref={searchInputRef}
             role="combobox"
             aria-autocomplete="list"
             aria-expanded={candidates.length > 0}
@@ -838,8 +895,8 @@ export default function MapApp() {
               searchAddresses(event.target.value);
             }}
             onKeyDown={handleSearchKeyDown}
-            placeholder="住所を入力（丁目・番地まで推奨）"
-            aria-label="住所を検索（丁目・番地まで推奨）"
+            placeholder="住所・地名・駅名を入力"
+            aria-label="住所・地名・駅名を検索"
           />
           {query && (
             <button
@@ -867,7 +924,7 @@ export default function MapApp() {
             </button>
           )}
           <button className="search-submit" data-testid="location-search-submit" type="submit">
-            {searching ? "検索中" : "全情報を見る"}
+            {searching ? "検索中" : "調べる"}
           </button>
           {candidates.length > 0 && (
             <div className="suggestions" id="location-suggestions" role="listbox">
@@ -897,7 +954,7 @@ export default function MapApp() {
               aria-current={entry.key === mode ? "page" : undefined}
               onClick={() => changeMode(entry.key)}
             >
-              {entry.label}
+              {entry.shortLabel}
             </button>
           ))}
         </nav>
@@ -1033,12 +1090,48 @@ export default function MapApp() {
         <aside
           ref={dossierSheetRef}
           className="result-sheet dossier-sheet"
+          aria-label="選択した地点の土地カルテ"
+          data-sheet-level={sheetLevel}
           aria-live="polite"
           aria-busy={loadingDossier}
           data-testid="dossier-sheet"
           tabIndex={-1}
         >
           <div className="sheet-grabber" />
+          <div className="sheet-view-switcher" aria-label="土地カルテの表示量">
+            <button
+              type="button"
+              className={sheetLevel === "peek" ? "active" : ""}
+              aria-pressed={sheetLevel === "peek"}
+              onClick={() => setSheetLevel("peek")}
+            >
+              地図中心
+            </button>
+            <button
+              type="button"
+              className={sheetLevel === "half" ? "active" : ""}
+              aria-pressed={sheetLevel === "half"}
+              onClick={() => setSheetLevel("half")}
+            >
+              要点
+            </button>
+            <button
+              type="button"
+              className={sheetLevel === "full" ? "active" : ""}
+              aria-pressed={sheetLevel === "full"}
+              onClick={() => setSheetLevel("full")}
+            >
+              全情報
+            </button>
+            <button
+              type="button"
+              className="sheet-view-close"
+              aria-label="土地カルテを閉じる"
+              onClick={closeDossier}
+            >
+              ×
+            </button>
+          </div>
           {loadingDossier && (
             <div className="loading-result" data-testid="dossier-loading">
               <span className="spinner" />
@@ -1057,7 +1150,7 @@ export default function MapApp() {
                 <strong>この地点の土地情報をまとめられませんでした</strong>
                 <p>{error}</p>
               </div>
-              <button type="button" onClick={() => setError(null)}>
+              <button type="button" onClick={closeDossier}>
                 閉じる
               </button>
             </div>
@@ -1065,7 +1158,8 @@ export default function MapApp() {
           {!loadingDossier && dossier && (
             <LandDossierPanel
               dossier={dossier}
-              onClose={() => setDossier(null)}
+              onClose={closeDossier}
+              onOpenDetails={() => setSheetLevel("full")}
             />
           )}
         </aside>
@@ -1088,6 +1182,20 @@ export default function MapApp() {
                 ×
               </button>
             </div>
+            <nav className="info-tool-links" aria-label="関連画面">
+              <a href="/integrated">
+                <strong>統合コパイロット</strong>
+                <span>住所や物件URLからAIと全情報を見る</span>
+              </a>
+              <a href="/nexus">
+                <strong>NEXUS 物件判定</strong>
+                <span>物件条件と土地を分けて確認する</span>
+              </a>
+              <a href="/profile">
+                <strong>従来の土地カルテ</strong>
+                <span>100m区画の研究レイヤーを見る</span>
+              </a>
+            </nav>
             <div className="info-content">
               <article>
                 <span>01</span>

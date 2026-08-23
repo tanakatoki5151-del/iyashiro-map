@@ -294,3 +294,33 @@ test("address suggestions prevent stale results and support keyboard navigation"
   assert.match(map, /tabIndex=\{-1\}/);
   assert.doesNotMatch(map, /placeholder="住所・駅名・施設名/);
 });
+
+test("the dossier is progressively disclosed in a map-first responsive workspace", async () => {
+  const [panel, map, page, styles] = await Promise.all([
+    read(panelPath),
+    read(mapPath),
+    read("app/page.tsx"),
+    read("app/globals.css"),
+  ]);
+
+  assert.match(panel, /className="dossier-decision"/);
+  assert.match(panel, /className="dossier-axis-grid"/);
+  assert.match(panel, /const alreadyShownIds = new Set/);
+  assert.match(panel, /<details[\s\S]{0,120}className="dossier-item"/);
+  assert.match(panel, /data-dossier-section=\{section\.id\}/);
+  assert.match(map, /type SheetLevel = "peek" \| "half" \| "full"/);
+  assert.match(map, /data-sheet-level=\{sheetLevel\}/);
+  assert.match(map, /className="sheet-view-switcher"/);
+  assert.match(styles, /\.map-app--dossier-open \.map-stage/);
+  assert.match(styles, /\.dossier-sheet\[data-sheet-level="full"\]/);
+  assert.doesNotMatch(page, /position:\s*"fixed"/);
+  assert.match(map, /className="info-tool-links"/);
+  assert.match(map, /dossierSheetRef\.current\?\.scrollTo\(\{ top: 0/);
+  assert.match(map, /className="sheet-view-close"/);
+  assert.match(map, /onOpenDetails=\{\(\) => setSheetLevel\("full"\)\}/);
+  assert.match(panel, /htmlId=\{"hard-avoid-" \+ item\.id\}/);
+  assert.equal([...panel.matchAll(/summaryLabel="詳しい根拠・全数値を見る"/g)].length, 2);
+  assert.match(styles, /data-sheet-level="half"[\s\S]*?\.dossier-stage-one/);
+  assert.match(styles, /data-sheet-level="peek"[\s\S]*?\.dossier-axis-overview/);
+  assert.match(styles, /\.dossier-stage-one \.dossier-item\s*\{[\s\S]*?scroll-margin-top:\s*116px/);
+});
