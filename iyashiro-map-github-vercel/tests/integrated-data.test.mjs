@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 import {
   classifyIntegratedHardGate,
@@ -8,9 +9,84 @@ import {
 import { RowPromiseLruCache } from "../app/lib/integrated-data/row-cache.mjs";
 
 const root = new URL("../public/data/integrated/", import.meta.url);
+const EXPECTED_PUBLIC_MANIFEST_SHA256 =
+  "619a916dbbdb0a39239fa48207a5951925bca8ff1203ca34e6d324d5ae492138";
+const FORBIDDEN_PUBLIC_POINTERS = [
+  "drive.google.com",
+  "docs.google.com",
+  "source://",
+  "1hZdcDj1rxz-WWFG0VpqcAYEj0kjfNVxG7ykM2BdwhRI",
+  "1loTh2znyDXO7PNCESvWhBPa3K4RrHwqb",
+  "1-2a55teh7H5uKJI73NO1xvU8U83twSXA",
+  "1GtjoDGMkoxlvRzM3qFwGih6Q-ps7vu_F",
+];
+
+function sha256(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function assertNoPrivatePointers(text, relativePath) {
+  for (const forbidden of FORBIDDEN_PUBLIC_POINTERS) {
+    assert.equal(
+      text.toLowerCase().includes(forbidden.toLowerCase()),
+      false,
+      relativePath + " exposes forbidden pointer: " + forbidden,
+    );
+  }
+}
+
+async function readText(relativePath) {
+  const text = await readFile(new URL(relativePath, root), "utf8");
+  assertNoPrivatePointers(text, relativePath);
+  return text;
+}
 
 async function readJson(relativePath) {
-  return JSON.parse(await readFile(new URL(relativePath, root), "utf8"));
+  return JSON.parse(await readText(relativePath));
+}
+
+function assertArtifactDeclaration(artifact) {
+  assert.match(
+    artifact.path,
+    /^(?:rows\/g[0-9]{3}|facilities\/part-[0-9a-f])\.json$/,
+  );
+  assert.ok(Number.isSafeInteger(artifact.bytes));
+  assert.ok(artifact.bytes > 0);
+  assert.match(artifact.sha256, /^[0-9a-f]{64}$/);
+}
+
+async function readDeclaredJson(artifact) {
+  assertArtifactDeclaration(artifact);
+  const bytes = await readFile(new URL(artifact.path, root));
+  assert.equal(bytes.byteLength, artifact.bytes, artifact.path + " byte count");
+  assert.equal(sha256(bytes), artifact.sha256, artifact.path + " SHA-256");
+  const text = bytes.toString("utf8");
+  assertNoPrivatePointers(text, artifact.path);
+  return JSON.parse(text);
+}
+
+async function listPublicArtifacts(directory = root, prefix = "") {
+  const files = [];
+  const entries = await readdir(directory, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isFile() && entry.name.toLowerCase() === "desktop.ini") {
+      continue;
+    }
+    const relativePath = prefix + entry.name;
+    if (entry.isDirectory()) {
+      files.push(
+        ...(await listPublicArtifacts(
+          new URL(entry.name + "/", directory),
+          relativePath + "/",
+        )),
+      );
+    } else if (entry.isFile()) {
+      files.push(relativePath);
+    } else {
+      assert.fail("Unexpected public artifact type: " + relativePath);
+    }
+  }
+  return files.sort();
 }
 
 function findCell(row, cellId) {
@@ -18,16 +94,32 @@ function findCell(row, cellId) {
 }
 
 test("integrated release has exact R3 and ORBIT coverage", async () => {
-  const manifest = await readJson("release-manifest.json");
+  const manifestText = await readText("release-manifest.json");
+  assert.equal(
+    sha256(Buffer.from(manifestText, "utf8")),
+    EXPECTED_PUBLIC_MANIFEST_SHA256,
+  );
+  const manifest = JSON.parse(manifestText);
   const schema = await readJson("schema.json");
+  const expectedRowPaths = Array.from(
+    { length: 624 },
+    (_, gridRow) =>
+      "rows/g" + gridRow.toString().padStart(3, "0") + ".json",
+  );
+  const expectedFacilityPaths = Array.from(
+    { length: 16 },
+    (_, shardIndex) =>
+      "facilities/part-" + shardIndex.toString(16) + ".json",
+  );
 
   assert.equal(manifest.schemaVersion, "iyashiro-integrated-data/1.0");
   assert.equal(manifest.releaseId, "iyashiro-r3-orbit-v2-20260823");
   assert.equal(manifest.qa.status, "PASS");
+  assert.equal(manifest.qa.publicR3SourcePointersRedacted, true);
+  assert.equal(manifest.qa.publicR3SourcePointerValuesRedacted, 336240);
   assert.equal(manifest.sources.length, 3);
   for (const source of manifest.sources) {
-    assert.match(source.pointer, /^source:\/\//);
-    assert.doesNotMatch(source.pointer, /^[A-Za-z]:[\\/]/);
+    assert.ok(source.pointer === undefined || source.pointer === null);
   }
   assert.equal(manifest.coverage.totalCells, 120662);
   assert.equal(manifest.coverage.validCells, 120662);
@@ -42,18 +134,38 @@ test("integrated release has exact R3 and ORBIT coverage", async () => {
   assert.equal(manifest.outputs.rowShardCount, 624);
   assert.equal(manifest.outputs.rowShards.length, 624);
   assert.equal(manifest.outputs.facilityShardCount, 16);
+  assert.equal(manifest.outputs.facilityShards.length, 16);
   assert.equal(manifest.qa.allGridRowsMaterialized, true);
   assert.deepEqual(
     manifest.outputs.rowShards.map((artifact) => artifact.path),
-    Array.from(
-      { length: 624 },
-      (_, gridRow) =>
-        "rows/g" + gridRow.toString().padStart(3, "0") + ".json",
-    ),
+    expectedRowPaths,
+  );
+  assert.deepEqual(
+    manifest.outputs.facilityShards.map((artifact) => artifact.path),
+    expectedFacilityPaths,
+  );
+  for (const artifact of [
+    ...manifest.outputs.rowShards,
+    ...manifest.outputs.facilityShards,
+  ]) {
+    assertArtifactDeclaration(artifact);
+  }
+  assert.deepEqual(
+    await listPublicArtifacts(),
+    [
+      "release-manifest.json",
+      "schema.json",
+      ...expectedRowPaths,
+      ...expectedFacilityPaths,
+    ].sort(),
   );
   assert.equal(schema.semantics.unknownIsSafe, false);
   assert.equal(schema.semantics.shrine, "context_only");
   assert.equal(schema.semantics.generalHospital, "excluded_from_ranking");
+  assert.equal(
+    schema.semantics.r3SourcePointers,
+    "REDACTED_FROM_PUBLIC_RUNTIME",
+  );
 });
 
 test("all row shards independently sum to the frozen universe", async () => {
@@ -61,10 +173,11 @@ test("all row shards independently sum to the frozen universe", async () => {
   let cells = 0;
   let lensCells = 0;
   let passCells = 0;
+  let redactedSourceValues = 0;
   const seen = new Set();
 
   for (const artifact of manifest.outputs.rowShards) {
-    const row = await readJson(artifact.path);
+    const row = await readDeclaredJson(artifact);
     assert.equal(row.schemaVersion, manifest.schemaVersion);
     assert.equal(row.releaseId, manifest.releaseId);
     let priorColumn = -1;
@@ -82,6 +195,9 @@ test("all row shards independently sum to the frozen universe", async () => {
       }
       cells += 1;
       if (cell[9] !== null) {
+        assert.equal(cell[9].length, 52);
+        assert.deepEqual(cell[9].slice(48, 52), [null, null, null, null]);
+        redactedSourceValues += 4;
         lensCells += 1;
         if (cell[9][15] === true) passCells += 1;
       }
@@ -92,6 +208,7 @@ test("all row shards independently sum to the frozen universe", async () => {
   assert.equal(seen.size, 120662);
   assert.equal(lensCells, 84060);
   assert.equal(passCells, 20118);
+  assert.equal(redactedSourceValues, 336240);
 });
 
 test("facility shards independently sum to the canonical ledger", async () => {
@@ -100,7 +217,7 @@ test("facility shards independently sum to the canonical ledger", async () => {
   const ids = new Set();
 
   for (const artifact of manifest.outputs.facilityShards) {
-    const shard = await readJson(artifact.path);
+    const shard = await readDeclaredJson(artifact);
     assert.equal(shard.schemaVersion, manifest.schemaVersion);
     assert.equal(shard.releaseId, manifest.releaseId);
     for (const facility of shard.facilities) {

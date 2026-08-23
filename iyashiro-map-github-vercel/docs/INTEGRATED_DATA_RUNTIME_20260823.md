@@ -32,6 +32,29 @@ Expected closure:
 - app/lib/integrated-data/runtime.ts: server lookup and normalization.
 - tests/integrated-data.test.mjs: independent output-count and semantics QA.
 
+## Public provenance boundary
+
+Each frozen R3 input row includes four source URL fields for V15, RYUMYAK,
+ORBIT, and history. They are retained only as private build-input provenance.
+The public runtime preserves the 52-field tuple contract but emits fields 48-51
+as null. Public row shards, browser assets, API responses, and the public
+manifest must therefore contain no Google Drive/Docs URLs or file IDs from
+those fields.
+
+release-manifest.json identifies each frozen input only by project name,
+version or release, and SHA-256. It omits source pointer fields entirely and
+does not publish source:// identifiers, machine-local paths, or private share
+URLs. For this release the builder must redact exactly 336,240 non-empty
+values: 84,060 R3 cells multiplied by four private source fields. A mismatch
+fails the release instead of silently producing a smaller or larger public
+projection.
+
+Release verification covers both content and identity. Every declared row and
+facility artifact must match the byte length and SHA-256 recorded in the
+manifest, and the manifest must match the pinned release SHA-256. A recursive
+scan of public/data/integrated must also find zero Drive/Docs URLs and zero
+source:// pointers before deployment.
+
 ## Decision semantics
 
 A known feature at or inside 500 m can fail a hard gate. A measured distance outside
@@ -45,6 +68,10 @@ A known feature at or inside 500 m can fail a hard gate. A measured distance out
 - Shrine: displayed as context only.
 - Strong history and P8: 500 m R3 current-evidence gates.
 - No R3 lens row: R3 status remains UNKNOWN.
+
+UNKNOWN, source-limited, and incomplete-coverage states are not safety results.
+Absence of a returned feature in those states must never be presented as proof
+that the location is clear or safe.
 
 Spiritual Pass=true is exposed as pass_current_evidence; it is not named safe,
 certified, or complete.
@@ -74,9 +101,12 @@ header. The secret is never placed in a URL, response, manifest, or log.
 Deployment Protection must allow the server-side static fetch; verify both
 /data/integrated/release-manifest.json and the profile API after deployment.
 
-Before a lookup, release-manifest.json must pass schema, release ID, source
-provenance, QA, coverage-count, and exact 624-row readiness checks. A missing
-manifest or declared row raises IntegratedArtifactMissingError; a malformed or
-non-PASS release raises IntegratedReleaseNotReadyError. Only a present row shard
-whose cells array does not contain the requested in-range cell returns null.
-This keeps artifact loss distinct from a canonical invalid cell.
+Before a lookup, release-manifest.json must pass its pinned SHA-256, schema,
+release ID, source identity metadata, QA, coverage-count, and exact 624-row
+readiness checks. A loaded shard must also match the manifest-declared byte
+length and SHA-256 before parsing. A missing manifest or declared row raises
+IntegratedArtifactMissingError; an identity mismatch, malformed release, or
+non-PASS release raises IntegratedReleaseNotReadyError. Only a present and
+verified row shard whose cells array does not contain the requested in-range
+cell returns null. This keeps artifact loss or tampering distinct from a
+canonical invalid cell.

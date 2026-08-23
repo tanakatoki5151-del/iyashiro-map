@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
@@ -308,6 +309,82 @@ test("profile layers retain rich V15 and RYUMYAK runtime objects", async () => {
   assert.equal(typeof layers.HISTORY_P8, "object");
   assert.equal(typeof layers.LEGACY_CONTEXT, "object");
 });
+
+test("profile layers independently hide RYUMYAK for the real V15-only cell g25-309", async () => {
+  const shard = JSON.parse(await readFile(
+    path.join(root, "public/data/integrated/rows/g025.json"),
+    "utf8",
+  ));
+  const cell = shard.cells.find((candidate) => candidate[0] === "g25-309");
+  assert.ok(cell);
+  const rawR3 = cell[9];
+  assert.ok(Array.isArray(rawR3));
+  const record = {
+    layers: {
+      r3: {
+        availability: "available",
+        v15: { rank: rawR3[6], zone: rawR3[7], regime: rawR3[8] },
+        ryumyak: {
+          rank: rawR3[9],
+          zone: rawR3[10],
+          area: rawR3[11],
+          confidence: rawR3[12],
+          currentWater: rawR3[13],
+          hardSplit: rawR3[14],
+        },
+      },
+    },
+  };
+  assert.equal(record.layers.r3.availability, "available");
+  assert.equal(record.layers.r3.v15.rank, 945);
+  assert.deepEqual(
+    [
+      record.layers.r3.ryumyak.rank,
+      record.layers.r3.ryumyak.zone,
+      record.layers.r3.ryumyak.area,
+      record.layers.r3.ryumyak.confidence,
+      record.layers.r3.ryumyak.currentWater,
+      record.layers.r3.ryumyak.hardSplit,
+    ],
+    [null, null, null, null, null, null],
+  );
+
+  assert.equal(profileShape.hasMeaningfulV153Data(record.layers.r3.v15), true);
+  assert.equal(profileShape.hasMeaningfulRyumyakData(record.layers.r3.ryumyak), false);
+  const layers = profileShape.materializeProfileLayers(record);
+  assert.equal(layers.V15_3.rank, 945);
+  assert.equal(layers.RYUMYAK, null);
+});
+
+test("profile layers independently retain a meaningful RYUMYAK-only axis", () => {
+  const record = {
+    layers: {
+      r3: {
+        availability: "available",
+        v15: { rank: null, zone: " ", regime: null },
+        ryumyak: { rank: 0, zone: null, area: null, confidence: null, currentWater: null, hardSplit: null },
+      },
+    },
+  };
+  const layers = profileShape.materializeProfileLayers(record);
+  assert.equal(layers.V15_3, null);
+  assert.equal(layers.RYUMYAK.rank, 0);
+});
+
+test("profile layers do not expose V15 or RYUMYAK without an R3 lens record", async () => {
+  const runtime = await load("app/lib/integrated-data/runtime.ts");
+  await runtime.ensureIntegratedReleaseReady();
+  const record = await runtime.lookupIntegratedCell("g45-201");
+  assert.ok(record);
+  assert.equal(record.layers.r3.availability, "unknown_no_lens_record");
+
+  const layers = profileShape.materializeProfileLayers(record);
+  assert.equal(layers.V15_3, null);
+  assert.equal(layers.RYUMYAK, null);
+  assert.equal(layers.LEGACY_CONTEXT, null);
+  assert.equal(layers.R3_PERSONAL_GATE.availability, "unknown_no_lens_record");
+});
+
 test("address precision rejects chome-only and preserves component kinds", () => {
   assert.equal(address.hasPointAddressPrecision("東京都新宿区西新宿2丁目"), false);
   assert.equal(address.hasPointAddressPrecision("東京都新宿区西新宿2丁目8番1号"), true);

@@ -17,6 +17,7 @@ export type RiskItem = {
 export type ModernResult = {
   score: number;
   label:
+    | "資料不足・要確認"
     | "低リスク"
     | "低〜中リスク"
     | "要確認"
@@ -304,22 +305,25 @@ export async function analyzeModern(lat: number, lng: number) {
     ),
   );
   const score = clamp(100 - landRisk, 0, 100);
+  const unknownCount = items.filter((item) => item.score === null).length;
+  const provisional = completeness < 60 || unknownCount > 0;
   const label: ModernResult["label"] =
-    score >= 80
-      ? "低リスク"
-      : score >= 60
-        ? "低〜中リスク"
-        : score >= 40
-          ? "要確認"
-          : score >= 20
-            ? "高リスク"
-            : "非常に高リスク";
+    provisional
+      ? "資料不足・要確認"
+      : score >= 80
+        ? "低リスク"
+        : score >= 60
+          ? "低〜中リスク"
+          : score >= 40
+            ? "要確認"
+            : score >= 20
+              ? "高リスク"
+              : "非常に高リスク";
   const reasons = items
     .filter((item) => item.score !== null)
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
     .slice(0, 3)
     .map((item) => `${item.label}: ${item.detail}`);
-  const unknownCount = items.filter((item) => item.score === null).length;
   if (unknownCount)
     reasons.push(`未判定データ ${unknownCount}項目（安全扱いしていません）`);
   const result: ModernResult = {
@@ -327,7 +331,7 @@ export async function analyzeModern(lat: number, lng: number) {
     label,
     landRisk,
     completeness,
-    provisional: completeness < 60 || unknownCount > 0,
+    provisional,
     waterRisk,
     slopeRisk,
     groundRisk,

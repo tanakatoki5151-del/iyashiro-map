@@ -6,6 +6,7 @@ import { analyzeTheory, type TheoryResult } from "./theory";
 export type CombinedResult = {
   score: number;
   label:
+    | "資料不足・要確認"
     | "住みやすさ候補"
     | "概ね良好"
     | "要確認"
@@ -53,11 +54,12 @@ export function combineScores(
     (modern.waterRisk ?? 0) >= 80 || (modern.slopeRisk ?? 0) >= 80;
   if (capped) score = Math.min(score, 39);
   score = Math.round(clamp(score, 0, 100));
+  const provisional = modern.completeness < 60 || modern.provisional;
   return {
     score,
-    label: combinedLabel(score),
+    label: provisional ? "資料不足・要確認" : combinedLabel(score),
     theoryWeight: round(weight),
-    provisional: modern.completeness < 60 || modern.provisional,
+    provisional,
     cappedByMajorRisk: capped,
     reasons: [
       `現代的土地条件を ${Math.round((1 - weight) * 100)}%、イヤシロ仮説を ${Math.round(weight * 100)}%で反映`,

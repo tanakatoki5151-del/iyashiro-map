@@ -24,6 +24,72 @@
         }
       }
     },
+    "/api/v3/dossier": {
+      "get": {
+        "summary": "Build one comprehensive Japanese land dossier from an address or map coordinate",
+        "description": "The root map uses this same endpoint for both a clicked pin and an address. Supply either the complete lat/lng pair (lon is an alias for lng), or q/address. Coordinates take precedence when supplied. The response keeps the two land pillars separate: Iyashiroji (= Terrain hypothesis), with V15.3 current and V10 comparison, and Ryumyak. A 500 m hard-avoid stage remains fail-closed: unknown or source-limited evidence is review, never safe.",
+        "parameters": [
+          {
+            "name": "lat",
+            "in": "query",
+            "required": false,
+            "description": "Latitude. Must be paired with lng or lon.",
+            "schema": { "type": "number", "minimum": -90, "maximum": 90 }
+          },
+          {
+            "name": "lng",
+            "in": "query",
+            "required": false,
+            "description": "Longitude. Preferred coordinate parameter; must be paired with lat.",
+            "schema": { "type": "number", "minimum": -180, "maximum": 180 }
+          },
+          {
+            "name": "lon",
+            "in": "query",
+            "required": false,
+            "description": "Alias for lng; must be paired with lat.",
+            "schema": { "type": "number", "minimum": -180, "maximum": 180 }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Address to resolve when coordinates are not supplied.",
+            "schema": { "type": "string", "minLength": 2, "maxLength": 160 }
+          },
+          {
+            "name": "address",
+            "in": "query",
+            "required": false,
+            "description": "Alias for q.",
+            "schema": { "type": "string", "minLength": 2, "maxLength": 160 }
+          },
+          {
+            "name": "label",
+            "in": "query",
+            "required": false,
+            "description": "Optional display label for a coordinate. It is not treated as location evidence.",
+            "schema": { "type": "string", "maxLength": 200 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Comprehensive land dossier",
+            "headers": {
+              "Cache-Control": { "schema": { "type": "string", "const": "no-store" } }
+            },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LandDossier" } } }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "422": { "$ref": "#/components/responses/Error" },
+          "500": { "$ref": "#/components/responses/Error" },
+          "502": { "$ref": "#/components/responses/Error" },
+          "503": { "$ref": "#/components/responses/Error" },
+          "504": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
     "/api/v3/resolve": {
       "post": {
         "summary": "Resolve an address or coordinate to uncertainty-weighted canonical cells",
@@ -193,6 +259,170 @@
           "checkedAt": { "type": "string", "format": "date-time" },
           "readiness": { "$ref": "#/components/schemas/ReleaseReadiness" },
           "current": { "$ref": "#/components/schemas/ReleaseCatalogCurrent" }
+        },
+        "additionalProperties": false
+      },
+      "DossierStatus": {
+        "type": "string",
+        "enum": ["avoid", "review", "current_clear", "available", "context", "unknown"]
+      },
+      "DossierDetail": {
+        "type": "object",
+        "required": ["label", "value"],
+        "properties": {
+          "label": { "type": "string" },
+          "value": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "DossierItem": {
+        "type": "object",
+        "required": ["id", "title", "status", "summary", "explanation", "details", "coverage", "source"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "status": { "$ref": "#/components/schemas/DossierStatus" },
+          "summary": { "type": "string" },
+          "explanation": { "type": "string" },
+          "details": { "type": "array", "items": { "$ref": "#/components/schemas/DossierDetail" } },
+          "coverage": { "type": "string" },
+          "source": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "DossierSection": {
+        "type": "object",
+        "required": ["id", "title", "intro", "items"],
+        "properties": {
+          "id": { "type": "string", "enum": ["terrain", "water", "ground", "history", "facilities"] },
+          "title": { "type": "string" },
+          "intro": { "type": "string" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/DossierItem" } }
+        },
+        "additionalProperties": false
+      },
+      "MissingInformation": {
+        "type": "object",
+        "required": ["id", "priority", "title", "currentState", "nextAction"],
+        "properties": {
+          "id": { "type": "string" },
+          "priority": { "type": "string", "enum": ["high", "medium", "low"] },
+          "title": { "type": "string" },
+          "currentState": { "type": "string" },
+          "nextAction": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "LandDossierLocation": {
+        "type": "object",
+        "required": ["label", "lat", "lng", "coordinate", "cellId", "cellStability", "coverageStatus", "coverageNote"],
+        "properties": {
+          "label": { "type": "string" },
+          "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+          "lng": { "type": "number", "minimum": -180, "maximum": 180 },
+          "coordinate": { "type": "string" },
+          "cellId": { "type": "string", "pattern": "^g[0-9]{1,3}-[0-9]{1,3}$" },
+          "cellStability": { "type": "string" },
+          "coverageStatus": { "type": "string" },
+          "coverageNote": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "LandDossierStageOne": {
+        "type": "object",
+        "required": ["thresholdM", "status", "title", "summary", "items"],
+        "properties": {
+          "thresholdM": { "type": "integer", "const": 500 },
+          "status": { "type": "string", "enum": ["avoid", "review", "current_clear"] },
+          "title": { "type": "string" },
+          "summary": { "type": "string" },
+          "items": { "type": "array", "minItems": 5, "items": { "$ref": "#/components/schemas/DossierItem" } }
+        },
+        "additionalProperties": false
+      },
+      "LandDossierIyashirojiAxis": {
+        "type": "object",
+        "required": ["title", "summary", "current", "legacy", "comparisonNote"],
+        "properties": {
+          "title": { "const": "イヤシロジ（＝テライン仮説）" },
+          "summary": { "type": "string" },
+          "current": { "$ref": "#/components/schemas/DossierItem" },
+          "legacy": { "$ref": "#/components/schemas/DossierItem" },
+          "comparisonNote": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "LandDossierRyumyakAxis": {
+        "type": "object",
+        "required": ["title", "summary", "current"],
+        "properties": {
+          "title": { "const": "龍脈" },
+          "summary": { "type": "string" },
+          "current": { "$ref": "#/components/schemas/DossierItem" }
+        },
+        "additionalProperties": false
+      },
+      "LandDossierAxes": {
+        "type": "object",
+        "required": ["iyashiroji", "ryumyak"],
+        "properties": {
+          "iyashiroji": { "$ref": "#/components/schemas/LandDossierIyashirojiAxis" },
+          "ryumyak": { "$ref": "#/components/schemas/LandDossierRyumyakAxis" }
+        },
+        "additionalProperties": false
+      },
+      "LandDossierVersionGuide": {
+        "type": "object",
+        "required": ["visible", "archivedFromNormalView", "note"],
+        "properties": {
+          "visible": {
+            "type": "array",
+            "prefixItems": [{ "const": "V15.3" }, { "const": "V10" }],
+            "items": false,
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "archivedFromNormalView": {
+            "type": "array",
+            "prefixItems": [{ "const": "V11" }, { "const": "V12" }, { "const": "V13" }, { "const": "V14" }],
+            "items": false,
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "note": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "LandDossierSource": {
+        "type": "object",
+        "required": ["title", "project", "version", "pointer"],
+        "properties": {
+          "title": { "type": "string" },
+          "project": { "type": "string" },
+          "version": { "type": ["string", "null"] },
+          "pointer": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      },
+      "LandDossier": {
+        "type": "object",
+        "required": ["schemaVersion", "generatedAt", "location", "stageOne", "axes", "sections", "missingInformation", "versionGuide", "sources", "cautions"],
+        "properties": {
+          "schemaVersion": { "const": "land-dossier/1.0" },
+          "generatedAt": { "type": "string", "format": "date-time" },
+          "location": { "$ref": "#/components/schemas/LandDossierLocation" },
+          "stageOne": { "$ref": "#/components/schemas/LandDossierStageOne" },
+          "axes": { "$ref": "#/components/schemas/LandDossierAxes" },
+          "sections": {
+            "type": "array",
+            "minItems": 5,
+            "maxItems": 5,
+            "items": { "$ref": "#/components/schemas/DossierSection" }
+          },
+          "missingInformation": { "type": "array", "items": { "$ref": "#/components/schemas/MissingInformation" } },
+          "versionGuide": { "$ref": "#/components/schemas/LandDossierVersionGuide" },
+          "sources": { "type": "array", "items": { "$ref": "#/components/schemas/LandDossierSource" } },
+          "cautions": { "type": "array", "items": { "type": "string" } }
         },
         "additionalProperties": false
       },

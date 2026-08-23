@@ -438,3 +438,396 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
   .terrain-score-grid strong { font-size: 23px; }
   .secondary-score-row { grid-template-columns: 1fr; }
 }
+/* Unified land dossier */
+.dossier-sheet {
+  width: min(620px, calc(100vw - 48px));
+  padding: 8px 22px 18px;
+  scroll-behavior: smooth;
+  scrollbar-gutter: stable;
+}
+.dossier-panel { min-width: 0; }
+.dossier-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 2px 0 14px;
+}
+.dossier-kicker {
+  margin: 0 0 4px;
+  color: var(--green);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: .12em;
+}
+.dossier-hero h2 {
+  margin: 0;
+  font: 600 clamp(22px, 2.4vw, 30px)/1.25 "Yu Mincho", "Hiragino Mincho ProN", serif;
+  letter-spacing: .025em;
+}
+.dossier-coordinate {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.dossier-close {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: #f6f5ef;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 20px;
+}
+.dossier-coverage {
+  display: grid;
+  gap: 4px;
+  padding: 13px 15px;
+  border: 1px solid rgba(15,121,107,.2);
+  border-radius: 15px;
+  background: rgba(15,121,107,.055);
+}
+.dossier-coverage strong { color: var(--green-dark); font-size: 12px; }
+.dossier-coverage span {
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.55;
+}
+.dossier-coverage small { color: var(--muted); font-size: 8px; line-height: 1.5; }
+.dossier-index {
+  display: flex;
+  position: sticky;
+  z-index: 4;
+  top: -8px;
+  gap: 6px;
+  margin: 13px -10px 0;
+  overflow-x: auto;
+  padding: 10px;
+  background: rgba(255,255,252,.96);
+  scrollbar-width: thin;
+  backdrop-filter: blur(12px);
+}
+.dossier-index a {
+  min-height: 32px;
+  flex: none;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: white;
+  color: var(--ink);
+  font-size: 9px;
+  font-weight: 800;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.dossier-index a:first-child {
+  border-color: rgba(153,27,27,.24);
+  background: rgba(153,27,27,.055);
+  color: #7f1d1d;
+}
+.dossier-reading-guide {
+  margin: 4px 0 0;
+  padding: 11px 13px;
+  border-left: 3px solid var(--green);
+  background: #f5f6f1;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.7;
+}
+.dossier-section {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 420px;
+  scroll-margin-top: 64px;
+  margin-top: 16px;
+  padding-top: 17px;
+  border-top: 1px solid var(--line);
+}
+.dossier-section-heading { display: grid; gap: 3px; }
+.dossier-section-heading > span,
+.dossier-version-label {
+  margin: 0;
+  color: var(--green);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .11em;
+}
+.dossier-section-heading h3 {
+  margin: 0;
+  font: 650 19px/1.35 "Yu Mincho", "Hiragino Mincho ProN", serif;
+}
+.dossier-section-intro {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.7;
+}
+.dossier-stage-one {
+  margin-top: 13px;
+  padding: 17px;
+  border: 1px solid rgba(153,27,27,.18);
+  border-radius: 18px;
+  background: rgba(153,27,27,.035);
+}
+.dossier-pillar {
+  padding: 17px;
+  border: 1px solid rgba(15,121,107,.18);
+  border-radius: 18px;
+  background: rgba(15,121,107,.03);
+}
+.dossier-item-list { display: grid; gap: 9px; margin-top: 11px; }
+.dossier-item {
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: 14px;
+  background: white;
+}
+.dossier-item[data-status="avoid"] { border-left-color: #991b1b; background: #fffafa; }
+.dossier-item[data-status="review"] { border-left-color: #d97706; background: #fffdf7; }
+.dossier-item[data-status="current_clear"] { border-left-color: #16845b; }
+.dossier-item[data-status="available"] { border-left-color: var(--green); }
+.dossier-item[data-status="context"] { border-left-color: #6d5e94; }
+.dossier-item[data-status="unknown"] { border-left-color: #8b928f; background: #fafaf7; }
+.dossier-item-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.dossier-item-heading h4 { margin: 0; font-size: 13px; line-height: 1.45; }
+.dossier-status {
+  flex: none;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #edf2ee;
+  color: var(--green-dark);
+  font-size: 8px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+[data-status="avoid"] .dossier-status { background: #fee8e8; color: #8b1b1b; }
+[data-status="review"] .dossier-status { background: #fff0cc; color: #8a5700; }
+[data-status="unknown"] .dossier-status { background: #eceeea; color: #5c6562; }
+.dossier-item-summary {
+  margin: 8px 0 0;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.6;
+}
+.dossier-item-explanation {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.7;
+}
+.dossier-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 1px;
+  margin: 11px 0 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--line);
+}
+.dossier-detail-grid > div {
+  min-width: 0;
+  padding: 8px 9px;
+  background: #fafaf6;
+}
+.dossier-detail-grid dt { color: var(--muted); font-size: 8px; font-weight: 800; }
+.dossier-detail-grid dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.45;
+}
+.dossier-evidence-note {
+  display: grid;
+  gap: 2px;
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+  color: #7b8581;
+  font-size: 8px;
+  line-height: 1.5;
+}
+.dossier-version-grid {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) minmax(0,1fr);
+  gap: 9px;
+  margin-top: 12px;
+}
+.dossier-version-label { margin: 0 0 6px; }
+.dossier-comparison-note {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: rgba(109,94,148,.07);
+  color: #574c73;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+.dossier-empty {
+  display: grid;
+  gap: 5px;
+  margin: 10px 0 0;
+  padding: 12px 13px;
+  border: 1px dashed rgba(101,112,108,.32);
+  border-radius: 12px;
+  background: #fafaf7;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.65;
+}
+.dossier-missing {
+  padding: 17px;
+  border: 1px solid rgba(217,119,6,.2);
+  border-radius: 18px;
+  background: rgba(217,119,6,.035);
+}
+.dossier-missing-list { display: grid; gap: 8px; margin-top: 11px; }
+.dossier-missing-list article {
+  padding: 12px 13px;
+  border: 1px solid rgba(217,119,6,.17);
+  border-radius: 12px;
+  background: white;
+}
+.dossier-missing-list article > span {
+  color: #966000;
+  font-size: 8px;
+  font-weight: 900;
+}
+.dossier-missing-list h4 { margin: 4px 0 6px; font-size: 12px; }
+.dossier-missing-list p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.65;
+}
+.dossier-missing-list strong {
+  display: block;
+  margin-top: 8px;
+  color: var(--ink);
+  font-size: 9px;
+}
+.dossier-sources {
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.dossier-sources summary {
+  padding: 13px 2px;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 850;
+}
+.dossier-sources > div { display: grid; gap: 6px; padding-bottom: 12px; }
+.dossier-sources article {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border-radius: 10px;
+  background: #f6f6f1;
+}
+.dossier-sources strong { font-size: 10px; }
+.dossier-sources span { color: var(--muted); font-size: 9px; }
+.dossier-sources small {
+  overflow-wrap: anywhere;
+  color: #7d8582;
+  font-size: 7px;
+  line-height: 1.5;
+}
+.dossier-cautions {
+  margin-top: 13px;
+  padding: 12px 13px;
+  border-radius: 12px;
+  background: #f4f2e9;
+}
+.dossier-cautions > strong { font-size: 10px; }
+.dossier-cautions ul {
+  margin: 7px 0 0;
+  padding-left: 17px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.65;
+}
+.dossier-cautions li + li { margin-top: 4px; }
+.dossier-actions {
+  display: flex;
+  position: sticky;
+  z-index: 3;
+  bottom: -18px;
+  gap: 8px;
+  margin: 15px -4px -18px;
+  padding: 10px 4px 18px;
+  background: linear-gradient(0deg,#fff 72%,rgba(255,255,255,0));
+}
+.dossier-actions a,
+.dossier-actions button {
+  display: grid;
+  min-height: 42px;
+  place-items: center;
+  border-radius: 11px;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 850;
+  text-decoration: none;
+}
+.dossier-actions a { flex: 1; background: var(--green-dark); color: white; }
+.dossier-actions button {
+  width: 76px;
+  border: 1px solid var(--line);
+  background: white;
+  color: var(--ink);
+}
+
+@media (max-width: 860px) {
+  .dossier-sheet { max-height: 72dvh; }
+  .dossier-hero h2 { font-size: 22px; }
+  .dossier-index { top: -7px; }
+  .dossier-version-grid { grid-template-columns: 1fr; }
+  .dossier-stage-one,
+  .dossier-pillar,
+  .dossier-missing { padding: 14px; }
+  .dossier-item-heading { align-items: flex-start; }
+  .dossier-actions { bottom: calc(-1 * max(14px, env(safe-area-inset-bottom))); }
+}
+@media (max-width: 420px) {
+  .dossier-sheet { max-height: 76dvh; padding-right: 12px; padding-left: 12px; }
+  .dossier-detail-grid { grid-template-columns: 1fr; }
+  .dossier-status { white-space: normal; text-align: right; }
+  .dossier-section-heading h3 { font-size: 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .result-sheet,
+  .spinner { animation: none; }
+  .dossier-sheet { scroll-behavior: auto; }
+}
+.dossier-stage-verdict {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 11px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: white;
+}
+.dossier-stage-verdict strong { font-size: 11px; }
+.dossier-stage-verdict span { color: var(--muted); font-size: 8px; font-weight: 800; }
+.dossier-stage-verdict[data-status="avoid"] { background: #fee8e8; color: #8b1b1b; }
+.dossier-stage-verdict[data-status="review"] { background: #fff0cc; color: #835400; }
+.dossier-stage-verdict[data-status="current_clear"] { background: #e8f6ef; color: #126748; }

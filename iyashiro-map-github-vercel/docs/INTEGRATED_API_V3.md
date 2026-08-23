@@ -9,6 +9,7 @@
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/api/v3/releases` | 検証済みの現行evidence release identityを公開 |
+| GET | `/api/v3/dossier` | 地図ピンまたは住所から、同じ形式の総合土地カルテを作成 |
 | POST | `/api/v3/resolve` | 住所または座標を不確実性付きcanonical cell集合へ解決 |
 | GET | `/api/v3/cells/{cellId}/profile` | release/source/coverage付きFact Envelopeと各レイヤーを取得 |
 | GET/POST | `/api/v3/properties/intake` | 対応サイト一覧／単一物件ページの安全な取込と手動fallback |
@@ -40,6 +41,47 @@ POSTは `Content-Type: application/json` または `application/*+json` を必�
 ```
 
 内部source、pointer、coverage、policyは公開しない。`manifestValidated:true` はmanifestのrelease/source/QA宣言、期待する624 row path宣言、coverage countの整合を確認した意味であり、全row artifactの内容やhashを毎回先読みしたという意味ではない。readinessを確認できない場合は503 `integrated_data_unavailable` とし、後続lookupで欠落rowを検出した場合もfail-closedする。
+
+## 土地カルテ：地図と住所の共通入口
+
+`GET /api/v3/dossier` は、最初の地図でピンを立てた場合と、住所を入力した場合を、同じ `land-dossier/1.0` 応答へ集約する。旧来の番号中心の診断を入口にせず、一地点について現在見られる情報と、まだ足りない情報を一続きで返す。
+
+座標入力:
+
+```text
+/api/v3/dossier?lat=35.6895&lng=139.6917&label=選択地点
+```
+
+住所入力:
+
+```text
+/api/v3/dossier?q=東京都新宿区西新宿2丁目8-1
+```
+
+- `lon` は `lng` の別名、`address` は `q` の別名である。
+- 座標は `lat` と `lng`（または `lon`）を必ず組にする。片方だけなら400で停止する。
+- 座標と住所が同時に来た場合は座標を地点証拠として使い、`label` や住所文字列は表示用の補助名に限る。
+- 住所だけの場合は既存のcanonical resolveを通し、住所の誤差で生じた最大25候補区画を同じ基準で確認する。
+- 応答は `Cache-Control: no-store` で返す。
+
+読み順は次のとおり固定する。
+
+1. 第一段階の絶対回避条件
+2. 一本目の土地軸「イヤシロジ（＝テライン仮説）」
+3. 二本目の独立した土地軸「龍脈」
+4. 地形、水、地盤、歴史、周辺施設
+5. 地名・土地名の由来
+6. まだ足りない情報と次に調べること
+
+第一段階は500mを固定基準とし、寺院、墓地、大規模・入院病院、強い歴史事象、P8重大履歴を確認する。一つでも閾値内なら `avoid` であり、後段の好材料で相殺しない。全候補区画・全対象資料の確認が揃った場合だけ `current_clear` とし、UNKNOWN、source-limited、未走査、未接続、住所範囲の一部欠落は `review` に残す。未発見を「存在しない」「安全」とは読まない。
+
+土地そのものの二本柱は混ぜない。
+
+- イヤシロジ（＝テライン仮説）は、現行 `V15.3` と変化を見るための比較用 `V10` だけを返す。版と計算方法が違うため平均しない。
+- 龍脈は独立した順位・ゾーン・水系状態として返し、イヤシロジ順位と合算しない。
+- V11〜V14は削除せず `versionGuide.archivedFromNormalView` に記録するが、通常画面の現行判断には表示しない。
+
+`sections` は `terrain`、`water`、`ground`、`history`、`facilities` の5区分である。各項目は日本語の要約、意味、確認範囲、根拠を持つ。地名由来を地点へ確実に結び付けられない場合は推測で文章を作らず、画面では情報不足、`missingInformation` では追加探索対象として示す。公開応答はこの構造化済み情報だけを返し、内部監査用の元応答やDrive内の保存先は返さない。
 
 ## Resolve
 

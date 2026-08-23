@@ -13,7 +13,6 @@ type LegacyRuntime = {
 const layerLabels: Record<string, string> = {
   placeGraph: "歴史・場所の履歴",
   v10Legacy: "V10 土地履歴",
-  v11Terrain: "V11 歴史・地形",
   veil: "重大履歴・伝承",
   underland: "地下・水",
   limen: "祭祀・境界",
@@ -84,7 +83,12 @@ export default function ProfileClient() {
   };
 
   const legacy = (profile?.legacyRuntime ?? {}) as LegacyRuntime;
-  const layers = profile ? Object.values(profile.layers).filter(Boolean) as LocationLayer[] : [];
+  const layers = profile
+    ? Object.values(profile.layers).filter(
+        (layer): layer is LocationLayer =>
+          Boolean(layer) && layer?.layerId !== "v11Terrain",
+      )
+    : [];
 
   return (
     <main style={{ minHeight: "100vh", background: "#f7f5f1", color: "#201d1a", fontFamily: '-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif' }}>

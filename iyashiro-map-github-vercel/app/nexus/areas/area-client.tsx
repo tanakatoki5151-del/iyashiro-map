@@ -80,7 +80,7 @@ export default function AreaClient() {
         <div style={{ background: "#e8f0f5", borderRadius: 14, padding: 14, border: "1px solid #bfd1dc" }}>研究B<br/><b style={{ fontSize: 23 }}>{landAreaMatrixSummary.readiness.B}</b></div>
         <div style={{ background: "#fff4dd", borderRadius: 14, padding: 14, border: "1px solid #ead09a" }}>研究C<br/><b style={{ fontSize: 23 }}>{landAreaMatrixSummary.readiness.C}</b></div>
         <div style={{ background: "#f1efec", borderRadius: 14, padding: 14, border: "1px solid #d8d2ca" }}>研究D<br/><b style={{ fontSize: 23 }}>{landAreaMatrixSummary.readiness.D}</b></div>
-        <div style={{ background: "white", borderRadius: 14, padding: 14, border: "1px solid #e4ded7" }}>市場Reference<br/><b style={{ fontSize: 23 }}>{landAreaMatrixSummary.market.reference}</b></div>
+        <div style={{ background: "white", borderRadius: 14, padding: 14, border: "1px solid #e4ded7" }}>市場 Reference<br/><b style={{ fontSize: 23 }}>{landAreaMatrixSummary.market.reference}</b></div>
       </section>
 
       <section style={{ background: "#fff7e6", border: "1px solid #ead49d", borderRadius: 15, padding: 15, marginBottom: 14, fontSize: 13, lineHeight: 1.65 }}>

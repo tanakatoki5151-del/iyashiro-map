@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { diagnoseLocation } from "@/app/lib/diagnose";
 import { clamp, withinRoughScope } from "@/app/lib/geo";
+import {
+  toGridAssessment,
+  type GridAssessment,
+} from "@/app/lib/grid-presentation";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -9,8 +13,8 @@ type GridCell = {
   lng: number;
   bounds: [[number, number], [number, number]];
   theory: { score: number; confidence: number; label: string };
-  modern: { score: number; completeness: number; label: string };
-  combined: { score: number; provisional: boolean; label: string };
+  modern: GridAssessment & { completeness: number };
+  combined: GridAssessment;
 };
 const finiteParam = (params: URLSearchParams, name: string) => {
   const value = Number(params.get(name));
@@ -89,15 +93,10 @@ export async function GET(request: NextRequest) {
           label: result.theory.label,
         },
         modern: {
-          score: result.modern.score,
+          ...toGridAssessment(result.modern),
           completeness: result.modern.completeness,
-          label: result.modern.label,
         },
-        combined: {
-          score: result.combined.score,
-          provisional: result.combined.provisional,
-          label: result.combined.label,
-        },
+        combined: toGridAssessment(result.combined),
       };
     } catch {
       return null;

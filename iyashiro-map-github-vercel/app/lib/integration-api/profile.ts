@@ -15,6 +15,7 @@ import type {
 
 type NormalizedDistanceValue = {
   distanceM: number | null;
+  uncertaintyMeters: number | null;
   triggered: boolean | null;
   nearestName: string | null;
   nearestAddress: string | null;
@@ -25,6 +26,8 @@ type NormalizedDistanceValue = {
   gateRole: string | null;
   thresholdM: number | null;
 };
+const CANONICAL_CELL_CENTER_MAX_ERROR_M = 71 as const;
+
 
 type FactorDefinition = {
   id: string;
@@ -89,6 +92,7 @@ function coverageIsSourceLimited(value: string | null): boolean {
 function distanceFromValue(value: unknown): NormalizedDistanceValue {
   if (typeof value === "number") {
     return {
+      uncertaintyMeters: null,
       distanceM: Number.isFinite(value) ? value : null,
       triggered: null,
       nearestName: null,
@@ -104,6 +108,7 @@ function distanceFromValue(value: unknown): NormalizedDistanceValue {
   const record = asRecord(value);
   if (!record) {
     return {
+      uncertaintyMeters: null,
       distanceM: null,
       triggered: null,
       nearestName: null,
@@ -160,6 +165,14 @@ function distanceFromValue(value: unknown): NormalizedDistanceValue {
     }
   }
   return {
+    uncertaintyMeters: finiteNumeric(
+      record.uncertaintyMeters ??
+      record.uncertaintyM ??
+      record.precisionMeters ??
+      record.precisionM ??
+      record.accuracyMeters ??
+      record.accuracyM,
+    ),
     distanceM,
     triggered,
     nearestName: typeof record.nearestName === "string"
@@ -210,13 +223,17 @@ function releasePointer(layer: string): ReleasePointer {
   };
 }
 
-function sourcePointers(): SourcePointer[] {
+function sourcePointers(layer: string): SourcePointer[] {
   const metadata = integratedReleaseMetadata();
   if (!Array.isArray(metadata.sources)) return [];
+  const relevantProjects = layer === "ORBIT"
+    ? new Set(["PROJECT_ORBIT", "PROJECT_ORBIT_FACILITIES"])
+    : new Set(["ALL_PROJECT_INTEGRATED_TOP20"]);
   return metadata.sources.flatMap((source) => {
     const record = asRecord(source);
     if (!record) return [];
     const project = typeof record.project === "string" ? record.project : "INTEGRATED_DATA";
+    if (!relevantProjects.has(project)) return [];
     return [{
       project,
       title: typeof record.title === "string" ? record.title : project,
@@ -240,7 +257,7 @@ function envelopeForFactor(cellId: string, record: IntegratedCellRecord, definit
     layer: definition.layer,
     subject: { kind: "canonical_cell", id: cellId },
     release: releasePointer(definition.layer),
-    sources: sourcePointers(),
+    sources: sourcePointers(definition.layer),
     coverage: {
       state: coverageState,
       checked,
@@ -254,7 +271,9 @@ function envelopeForFactor(cellId: string, record: IntegratedCellRecord, definit
     finding: {
       status: findingStatus,
       value: checked ? value : null,
-      uncertaintyMeters: null,
+      uncertaintyMeters: value.distanceM === null
+        ? null
+        : value.uncertaintyMeters ?? CANONICAL_CELL_CENTER_MAX_ERROR_M,
     },
     policy: {
       defaultEffect: definition.defaultEffect,

@@ -22,9 +22,12 @@ test("summarizes all 240 discovery points without residence ranking", async () =
   assert.equal(payload.frame.noEligibleZoneControls, 5);
   assert.equal(payload.semantics.residenceRanking, false);
   assert.equal(payload.semantics.syntheticTotalScore, false);
-  assert.equal(payload.coverage.v10Available, 240);
-  assert.equal(payload.coverage.underlandAvailable, 240);
-  assert.equal(payload.coverage.ecoscapeAvailable, 240);
+  assert.equal(payload.coverage.v10Available, 236);
+  assert.equal(payload.coverage.underlandAvailable, 236);
+  assert.equal(payload.coverage.ecoscapeAvailable, 236);
+  assert.equal(payload.frame.samples - payload.coverage.v10Available, 4);
+  assert.equal(payload.frame.samples - payload.coverage.underlandAvailable, 4);
+  assert.equal(payload.frame.samples - payload.coverage.ecoscapeAvailable, 4);
   assert.ok(payload.byStratum.A_LOCAL_TOP);
   assert.ok(payload.byStratum.E_LOCAL_BOTTOM_CONTROL);
   assert.ok(payload.researchQueues.convergence.count >= 0);

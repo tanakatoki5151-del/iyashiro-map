@@ -36,6 +36,13 @@ $ExpectedR3Header = @(
     "ECOSCAPE Tier", "PLACEGRAPH Status", "Identity Conflicts", "Source URL V15",
     "Source URL RY", "Source URL ORBIT", "Source URL History"
 )
+$PublicR3RedactedFields = [Collections.Generic.HashSet[string]]::new(
+    [string[]]@(
+        "Source URL V15", "Source URL RY", "Source URL ORBIT",
+        "Source URL History"
+    )
+)
+$ExpectedPublicR3SourcePointerCount = $ExpectedLensCount * $PublicR3RedactedFields.Count
 $ExpectedDistanceHeader = @(
     "cell_id", "grid_index", "cell_index", "municipality_index", "latitude",
     "longitude", "category", "distance_m", "nearest_facility_id", "nearest_name",
@@ -334,6 +341,7 @@ try {
     $r3CellSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $r3PassFlagCount = 0
     $r3PassSeen = 0
+    $r3SourcePointerValuesRedacted = 0
     try {
         $r3Parser = New-GzipCsvParserFromBytes $allLensBytes
         try {
@@ -353,7 +361,15 @@ try {
                 }
                 $tuple = [object[]]::new($ExpectedR3Header.Count - 1)
                 for ($index = 1; $index -lt $ExpectedR3Header.Count; $index++) {
-                    $tuple[$index - 1] = Convert-R3Value $ExpectedR3Header[$index] $fields[$index]
+                    $fieldName = $ExpectedR3Header[$index]
+                    if ($PublicR3RedactedFields.Contains($fieldName)) {
+                        if (-not [string]::IsNullOrEmpty($fields[$index])) {
+                            $r3SourcePointerValuesRedacted++
+                        }
+                        $tuple[$index - 1] = $null
+                    } else {
+                        $tuple[$index - 1] = Convert-R3Value $fieldName $fields[$index]
+                    }
                 }
                 $isPass = $tuple[15]
                 if ($isPass -eq $true) { $r3PassFlagCount++ }
@@ -375,6 +391,9 @@ try {
     Assert-True ($r3CellSet.Count -eq $ExpectedLensCount) "R3 all-lens count mismatch."
     Assert-True ($r3PassFlagCount -eq $ExpectedPassCount) "R3 pass flag count mismatch."
     Assert-True ($r3PassSeen -eq $ExpectedPassCount) "R3 pass set was not fully matched."
+    Assert-True ($r3SourcePointerValuesRedacted -eq $ExpectedPublicR3SourcePointerCount) (
+        "R3 public source-pointer redaction count mismatch."
+    )
 
     $facilitySet = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $facilitySummary = [Collections.Generic.Dictionary[string, object]]::new(
@@ -516,6 +535,7 @@ try {
             cemeteryCoverage = "UNKNOWN_REQUEST_REQUIRED_FOR_FULL_PERMIT_LEDGER"
             templeCoverage = "OSM_SNAPSHOT_COMPLETE_OFFICIAL_SITE_LINKAGE_PARTIAL"
             shrineCoverage = "OSM_SNAPSHOT_COMPLETE_OFFICIAL_SITE_LINKAGE_PARTIAL"
+            r3SourcePointers = "REDACTED_FROM_PUBLIC_RUNTIME"
         }
     }
     $schemaPath = Join-Path $OutputRoot "schema.json"
@@ -807,7 +827,6 @@ try {
             [ordered]@{
                 project = "ALL_PROJECT_INTEGRATED_TOP20"
                 version = "R3_20260822"
-                pointer = "source://DRIVE_CANONICAL_SYNC_20260823/ALL_PROJECT_TOP20_R3/IYASHIROCHI_ALL_PROJECT_INTEGRATED_TOP20_R3_20260822_BUNDLE.zip"
                 sha256 = Get-Sha256File $R3Bundle
                 innerArtifacts = @(
                     [ordered]@{
@@ -823,13 +842,11 @@ try {
             [ordered]@{
                 project = "PROJECT_ORBIT"
                 version = "v2_20260822"
-                pointer = "source://PROJECT_ORBIT/06_CELL_DISTANCES/ORBIT_CELL_FACILITY_DISTANCES_v2_20260822.csv.gz"
                 sha256 = $expectedDistanceHash
             },
             [ordered]@{
                 project = "PROJECT_ORBIT_FACILITIES"
                 version = "v2_20260822"
-                pointer = "source://PROJECT_ORBIT/05_CANONICAL_FACILITIES/ORBIT_CANONICAL_FACILITIES_v2_20260822.csv.gz"
                 sha256 = $expectedFacilityHash
             }
         )
@@ -868,6 +885,8 @@ try {
             r3DuplicateCells = 0
             orbitDuplicateFacilities = 0
             orbitMissingDistances = 0
+            publicR3SourcePointersRedacted = $true
+            publicR3SourcePointerValuesRedacted = $r3SourcePointerValuesRedacted
             allGridRowsMaterialized = $true
             maxR3OrbitCoordinateDeltaDegrees = $maxR3CoordinateDelta
             maxR3OrbitTempleDistanceDeltaM = $maxTempleDelta

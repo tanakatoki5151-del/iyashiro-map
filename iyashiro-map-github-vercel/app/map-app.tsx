@@ -2,6 +2,7 @@
 
 import {
   FormEvent,
+  KeyboardEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -9,17 +10,26 @@ import {
   useState,
 } from "react";
 import type * as Leaflet from "leaflet";
-import type { DiagnosisResult } from "./lib/diagnose";
+import LandDossierPanel from "./components/land-dossier-panel";
+import type { LandDossier } from "./lib/land-dossier-types";
+import {
+  gridAssessmentNeedsReview,
+  type GridAssessment,
+} from "./lib/grid-presentation";
 
 type Mode = "theory" | "modern" | "combined";
 type Candidate = { label: string; lat: number; lng: number };
+type DossierTarget =
+  | { kind: "point"; lat: number; lng: number; label?: string }
+  | { kind: "query"; query: string };
+
 type GridCell = {
   lat: number;
   lng: number;
   bounds: [[number, number], [number, number]];
   theory: { score: number; confidence: number; label: string };
-  modern: { score: number; completeness: number; label: string };
-  combined: { score: number; provisional: boolean; label: string };
+  modern: GridAssessment & { completeness: number };
+  combined: GridAssessment;
 };
 type PrecomputedGridCell = {
   lat: number;
@@ -34,6 +44,10 @@ type PrecomputedGridCell = {
   confidence: number;
 };
 type PrecomputedGrid = {
+  schemaVersion: string;
+  engine: {
+    name: string;
+  };
   generatedAt: string;
   center: {
     lat: number;
@@ -61,10 +75,11 @@ type PrecomputedGrid = {
 };
 
 const MODES: Array<{ key: Mode; label: string }> = [
-  { key: "theory", label: "イヤシロ仮説" },
-  { key: "modern", label: "土地リスク" },
-  { key: "combined", label: "住むなら" },
+  { key: "theory", label: "従来地形仮説（比較）" },
+  { key: "modern", label: "公的リスク地図" },
+  { key: "combined", label: "従来地形比較＋公的リスク" },
 ];
+const LEGACY_COMPARISON_ENGINE = "directional-line-crossing-v2";
 const HAZARDS = [
   ["flood", "洪水浸水想定", "https://disaportaldata.gsi.go.jp/raster/01_flood_l2_shinsuishin_data/{z}/{x}/{y}.png"],
   ["inner", "内水浸水", "https://disaportaldata.gsi.go.jp/raster/02_naisui_data/{z}/{x}/{y}.png"],
@@ -124,8 +139,10 @@ const safetyColor = (score: number) =>
     ? mix("#991b1b", "#d97706", score / 50)
     : mix("#d97706", "#16845b", (score - 50) / 50);
 
+const REVIEW_CELL_COLOR = "#8b928f";
 export default function MapApp() {
   const nodeRef = useRef<HTMLDivElement | null>(null);
+  const dossierSheetRef = useRef<HTMLElement | null>(null);
   const mapRef = useRef<Leaflet.Map | null>(null);
   const leafletRef = useRef<typeof Leaflet | null>(null);
   const markerRef = useRef<Leaflet.Marker | null>(null);
@@ -135,7 +152,9 @@ export default function MapApp() {
   const gridRef = useRef<Leaflet.LayerGroup | null>(null);
   const hazardRefs = useRef<Record<string, Leaflet.TileLayer>>({});
   const gridAbort = useRef<AbortController | null>(null);
-  const diagnosisAbort = useRef<AbortController | null>(null);
+  const dossierAbort = useRef<AbortController | null>(null);
+  const dossierRequestId = useRef(0);
+  const searchAbort = useRef<AbortController | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const modeRef = useRef<Mode>("theory");
 
@@ -144,15 +163,16 @@ export default function MapApp() {
   const [revision, setRevision] = useState(0);
   const [query, setQuery] = useState("");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [activeCandidateIndex, setActiveCandidateIndex] = useState(-1);
   const [searching, setSearching] = useState(false);
-  const [diagnosing, setDiagnosing] = useState(false);
-  const [diagnosis, setDiagnosis] = useState<DiagnosisResult | null>(null);
+  const [loadingDossier, setLoadingDossier] = useState(false);
+  const [dossier, setDossier] = useState<LandDossier | null>(null);
   const [precomputedGrids, setPrecomputedGrids] = useState<PrecomputedGrid[]>(
     [],
   );
   const [error, setError] = useState<string | null>(null);
   const [gridMessage, setGridMessage] = useState(
-    "クオレガ4.5km圏と田園都市線沿線の100m事前計算色を表示しています。",
+    "従来の地形仮説を見比べるための参考地図です。凍結V10正本と現行V15.3は、地点を選んだ後の詳細で確認できます。",
   );
   const [layersOpen, setLayersOpen] = useState(false);
   const [legendOpen, setLegendOpen] = useState(false);
@@ -175,7 +195,13 @@ export default function MapApp() {
           cache: "force-cache",
         }).then(async (response) => {
           if (!response.ok) throw new Error("precomputed grid unavailable");
-          return (await response.json()) as PrecomputedGrid;
+          const data = (await response.json()) as PrecomputedGrid;
+          if (
+            data.schemaVersion !== "2.0" ||
+            data.engine?.name !== LEGACY_COMPARISON_ENGINE
+          )
+            throw new Error("unexpected comparison grid provenance");
+          return data;
         }),
       ),
     )
@@ -183,7 +209,7 @@ export default function MapApp() {
       .catch((caught) => {
         if ((caught as Error).name !== "AbortError") {
           setGridMessage(
-            "事前計算の色分け画像を表示中。100m詳細区画は再読み込みで取得します。",
+            "従来の地形仮説・広域比較画像を表示中です。100m比較区画は再読み込みで取得します。凍結V10正本は地点詳細で確認してください。",
           );
         }
       });
@@ -198,66 +224,118 @@ export default function MapApp() {
     markerRef.current = L.marker([lat, lng], {
       icon: L.divIcon({
         className: "diagnosis-marker-shell",
-        html: '<span class="diagnosis-marker"><span></span></span>',
+        html: '<span class="diagnosis-marker" data-testid="selected-location-marker"><span></span></span>',
         iconSize: [34, 42],
         iconAnchor: [17, 39],
       }),
-      title: "診断地点",
+      title: "選択した地点",
     }).addTo(map);
   }, []);
 
-  const diagnosePoint = useCallback(
+  const loadDossier = useCallback(
     async (
-      lat: number,
-      lng: number,
-      options: { move?: boolean; result?: DiagnosisResult } = {},
+      target: DossierTarget,
+      options: { move?: boolean } = {},
     ) => {
+      const requestId = ++dossierRequestId.current;
+      if (searchTimer.current) {
+        clearTimeout(searchTimer.current);
+        searchTimer.current = null;
+      }
+      searchAbort.current?.abort();
       setCandidates([]);
+      setActiveCandidateIndex(-1);
+      setSearching(false);
       setError(null);
-      if (options.move && mapRef.current) {
-        mapRef.current.setView(
-          [lat, lng],
-          Math.max(14, mapRef.current.getZoom()),
-          { animate: true },
-        );
-      }
-      drawMarker(lat, lng);
-      window.history.replaceState(
-        null,
-        "",
-        `?lat=${lat.toFixed(6)}&lng=${lng.toFixed(6)}&mode=${modeRef.current}`,
-      );
-      if (options.result) {
-        setDiagnosis(options.result);
-        return;
-      }
-      diagnosisAbort.current?.abort();
-      const controller = new AbortController();
-      diagnosisAbort.current = controller;
-      setDiagnosing(true);
-      try {
-        const response = await fetch(`/api/diagnose?lat=${lat}&lng=${lng}`, {
-          signal: controller.signal,
-        });
-        const data = (await response.json()) as
-          | DiagnosisResult
-          | { message?: string };
-        if (!response.ok)
-          throw new Error(
-            "message" in data && data.message
-              ? data.message
-              : "診断できませんでした。",
+      setDossier(null);
+
+      const showSelectedPoint = (lat: number, lng: number) => {
+        if (options.move && mapRef.current) {
+          mapRef.current.setView(
+            [lat, lng],
+            Math.max(14, mapRef.current.getZoom()),
+            { animate: true },
           );
-        setDiagnosis(data as DiagnosisResult);
+        }
+        drawMarker(lat, lng);
+        window.history.replaceState(
+          null,
+          "",
+          "?lat=" +
+            lat.toFixed(6) +
+            "&lng=" +
+            lng.toFixed(6) +
+            "&mode=" +
+            modeRef.current,
+        );
+      };
+
+      const parameters = new URLSearchParams();
+      if (target.kind === "point") {
+        parameters.set("lat", String(target.lat));
+        parameters.set("lng", String(target.lng));
+        if (target.label) parameters.set("label", target.label);
+        showSelectedPoint(target.lat, target.lng);
+      } else {
+        parameters.set("q", target.query);
+      }
+
+      dossierAbort.current?.abort();
+      const controller = new AbortController();
+      dossierAbort.current = controller;
+      setLoadingDossier(true);
+      try {
+        const response = await fetch(
+          "/api/v3/dossier?" + parameters.toString(),
+          { signal: controller.signal },
+        );
+        const data = (await response.json()) as
+          | LandDossier
+          | { message?: string; error?: string };
+        if (
+          controller.signal.aborted ||
+          requestId !== dossierRequestId.current
+        ) {
+          return;
+        }
+        if (!response.ok) {
+          throw new Error(
+            ("message" in data && data.message) ||
+              ("error" in data && data.error) ||
+              "この地点の土地情報をまとめられませんでした。",
+          );
+        }
+        if (
+          !("schemaVersion" in data) ||
+          data.schemaVersion !== "land-dossier/1.0"
+        ) {
+          throw new Error("土地情報の形式を確認できませんでした。");
+        }
+        if (target.kind === "query") {
+          setQuery(data.location.label);
+          showSelectedPoint(data.location.lat, data.location.lng);
+        }
+        setDossier(data);
       } catch (caught) {
-        if ((caught as Error).name !== "AbortError") {
-          setDiagnosis(null);
+        if (
+          (caught as Error).name !== "AbortError" &&
+          !controller.signal.aborted &&
+          requestId === dossierRequestId.current
+        ) {
+          setDossier(null);
           setError(
-            caught instanceof Error ? caught.message : "診断に失敗しました。",
+            caught instanceof Error
+              ? caught.message
+              : "土地情報の取得に失敗しました。",
           );
         }
       } finally {
-        if (diagnosisAbort.current === controller) setDiagnosing(false);
+        if (
+          dossierAbort.current === controller &&
+          requestId === dossierRequestId.current
+        ) {
+          setLoadingDossier(false);
+        }
       }
     },
     [drawMarker],
@@ -297,7 +375,7 @@ export default function MapApp() {
         {
           pane: "iyashiroOverview",
           opacity: 0.78,
-          alt: "東京23区・横浜市・川崎市のイヤシロ仮説広域色分け",
+          alt: "東京23区・横浜市・川崎市の従来地形仮説・広域比較色分け（V10正本ではありません）",
           className: "iyashiro-overview",
         },
       ).addTo(map);
@@ -307,7 +385,7 @@ export default function MapApp() {
         {
           pane: "cuolegaGrid",
           opacity: 0.9,
-          alt: "クオレガ東京本社4.5km圏の100mイヤシロ判定",
+          alt: "クオレガ東京本社4.5km圏の従来地形仮説・100m比較",
           className: "cuolega-grid-overlay",
         },
       ).addTo(map);
@@ -317,7 +395,7 @@ export default function MapApp() {
         {
           pane: "cuolegaGrid",
           opacity: 0.9,
-          alt: "田園都市線の渋谷駅から二子玉川駅まで・線路中心1km帯の100mイヤシロ判定",
+          alt: "田園都市線の渋谷駅から二子玉川駅まで・線路中心1km帯の従来地形仮説・100m比較",
           className: "denentoshi-grid-overlay",
         },
       ).addTo(map);
@@ -364,7 +442,7 @@ export default function MapApp() {
       map.fitBounds(ALL_PRECOMPUTED_BOUNDS, { padding: [18, 18] });
       map.on("moveend", () => setRevision((v) => v + 1));
       map.on("click", (event) =>
-        void diagnosePoint(event.latlng.lat, event.latlng.lng),
+        void loadDossier({ kind: "point", lat: event.latlng.lat, lng: event.latlng.lng }),
       );
       mapRef.current = map;
       setReady(true);
@@ -380,11 +458,13 @@ export default function MapApp() {
       const lat = latParam === null ? Number.NaN : Number(latParam);
       const lng = lngParam === null ? Number.NaN : Number(lngParam);
       if (Number.isFinite(lat) && Number.isFinite(lng))
-        void diagnosePoint(lat, lng, { move: true });
+        void loadDossier({ kind: "point", lat, lng }, { move: true });
     });
     return () => {
       disposed = true;
-      diagnosisAbort.current?.abort();
+      dossierAbort.current?.abort();
+      searchAbort.current?.abort();
+      if (searchTimer.current) clearTimeout(searchTimer.current);
       gridAbort.current?.abort();
       mapRef.current?.remove();
       mapRef.current = null;
@@ -392,7 +472,7 @@ export default function MapApp() {
       cuolegaOverlayRef.current = null;
       denentoshiOverlayRef.current = null;
     };
-  }, [diagnosePoint]);
+  }, [loadDossier]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -428,14 +508,14 @@ export default function MapApp() {
     if (mode === "theory") {
       if (map.getZoom() < 14) {
         setGridMessage(
-          "クオレガ4.5km圏＋田園都市線1km沿線帯を表示中。拡大すると100m区画の数値を確認できます。",
+          "従来地形仮説のクオレガ4.5km圏＋田園都市線1km沿線帯を比較表示中。拡大すると100m参考区画を確認できます。凍結V10正本と現行V15.3は地点詳細に表示します。",
         );
         return;
       }
       if (!precomputedGrids.length) {
         queueMicrotask(() =>
           setGridMessage(
-            "100m区画データを読み込み中。色分け画像はすでに表示しています。",
+            "従来地形仮説の100m比較区画を読み込み中。広域比較画像はすでに表示しています。",
           ),
         );
         return;
@@ -452,21 +532,22 @@ export default function MapApp() {
           weight: 0.65,
           fillColor: originalCellColor(cell.label, cell.originalScore),
           fillOpacity: 0.3 + cell.confidence * 0.0048,
+          bubblingMouseEvents: false,
         });
         rectangle.bindTooltip(
-          `${cell.label}｜地点詳細 ${cell.detailScore}｜原典 ${cell.originalScore}`,
+          `従来地形仮説（V10正本ではありません）：${cell.label}｜地点詳細 ${cell.detailScore}｜交会ロジック点 ${cell.originalScore}`,
           {
             sticky: true,
             className: "map-tooltip",
           },
         );
         rectangle.on("click", () =>
-          void diagnosePoint(cell.lat, cell.lng),
+          void loadDossier({ kind: "point", lat: cell.lat, lng: cell.lng }),
         );
         rectangle.addTo(layer);
       });
       setGridMessage(
-        `${visible.length}区画を100m事前計算で表示中。クリックで6項目の詳細を確認できます。`,
+        `従来地形仮説の比較区画を${visible.length}件表示中。クリックすると、凍結V10正本・現行V15.3・龍脈・回避条件・土地情報をまとめて確認できます。`,
       );
       return;
     }
@@ -505,35 +586,40 @@ export default function MapApp() {
         if (controller.signal.aborted) return;
         cells.forEach((cell) => {
           const value =
-            mode === "modern"
-                ? cell.modern
-                : cell.combined;
+            mode === "modern" ? cell.modern : cell.combined;
+          const needsReview = gridAssessmentNeedsReview(value);
           const score = value.score;
-          const opacity =
-            mode === "modern"
-                ? 0.22 + cell.modern.completeness * 0.0046
-                : cell.combined.provisional
-                  ? 0.38
-                  : 0.62;
+          const opacity = needsReview
+            ? 0.52
+            : mode === "modern"
+              ? 0.22 + cell.modern.completeness * 0.0046
+              : 0.62;
+          const tooltip =
+            needsReview || score === null
+              ? "資料不足・要確認｜未取得データを安全扱いしません"
+              : `${value.label} ${score}/100`;
           const rectangle = L.rectangle(cell.bounds, {
             color: "rgba(255,255,255,.75)",
             weight: 1,
             fillColor:
-              safetyColor(score),
+              needsReview || score === null
+                ? REVIEW_CELL_COLOR
+                : safetyColor(score),
             fillOpacity: opacity,
+            bubblingMouseEvents: false,
           });
-          rectangle.bindTooltip(`${value.label} ${score}/100`, {
+          rectangle.bindTooltip(tooltip, {
             sticky: true,
             className: "map-tooltip",
           });
           rectangle.on("click", () =>
-            void diagnosePoint(cell.lat, cell.lng),
+            void loadDossier({ kind: "point", lat: cell.lat, lng: cell.lng }),
           );
           rectangle.addTo(layer);
         });
         setGridMessage(
           cells.length
-            ? `${cells.length}区画を概算表示中。クリックで詳細診断できます。`
+            ? `${cells.length}区画を概算表示中。クリックでこの地点の全情報を確認できます。`
             : "対象範囲内の区画がありません。",
         );
       })
@@ -544,7 +630,7 @@ export default function MapApp() {
           );
       });
     return () => controller.abort();
-  }, [diagnosePoint, mode, precomputedGrids, ready, revision]);
+  }, [loadDossier, mode, precomputedGrids, ready, revision]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -572,51 +658,101 @@ export default function MapApp() {
     });
   }, [activeHazards, ready]);
 
+  useEffect(() => {
+    if (!loadingDossier && (dossier || error)) {
+      dossierSheetRef.current?.focus();
+    }
+  }, [dossier, error, loadingDossier]);
+
   const searchAddresses = useCallback((value: string) => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
-    if (value.trim().length < 2) {
+    searchAbort.current?.abort();
+    setActiveCandidateIndex(-1);
+    const normalized = value.trim();
+    if (normalized.length < 2) {
       setCandidates([]);
+      setSearching(false);
       return;
     }
     setSearching(true);
     searchTimer.current = setTimeout(() => {
-      void fetch(`/api/search?q=${encodeURIComponent(value.trim())}`)
+      const controller = new AbortController();
+      searchAbort.current = controller;
+      void fetch(
+        `/api/search?q=${encodeURIComponent(normalized)}`,
+        { signal: controller.signal },
+      )
         .then(async (response) => {
           const data = (await response.json()) as { candidates?: Candidate[] };
           return response.ok ? data.candidates ?? [] : [];
         })
-        .then(setCandidates)
-        .finally(() => setSearching(false));
+        .then((nextCandidates) => {
+          if (!controller.signal.aborted) setCandidates(nextCandidates);
+        })
+        .catch((caught) => {
+          if ((caught as Error).name !== "AbortError") setCandidates([]);
+        })
+        .finally(() => {
+          if (searchAbort.current === controller) {
+            searchAbort.current = null;
+            setSearching(false);
+          }
+        });
     }, 320);
   }, []);
 
   const selectCandidate = (candidate: Candidate) => {
     setQuery(candidate.label);
-    void diagnosePoint(candidate.lat, candidate.lng, { move: true });
+    setActiveCandidateIndex(-1);
+    void loadDossier(
+      {
+        kind: "point",
+        lat: candidate.lat,
+        lng: candidate.lng,
+        label: candidate.label,
+      },
+      { move: true },
+    );
+  };
+
+  const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown" && candidates.length > 0) {
+      event.preventDefault();
+      setActiveCandidateIndex((current) =>
+        current >= candidates.length - 1 ? 0 : current + 1,
+      );
+      return;
+    }
+    if (event.key === "ArrowUp" && candidates.length > 0) {
+      event.preventDefault();
+      setActiveCandidateIndex((current) =>
+        current <= 0 ? candidates.length - 1 : current - 1,
+      );
+      return;
+    }
+    if (event.key === "Enter" && activeCandidateIndex >= 0) {
+      event.preventDefault();
+      selectCandidate(candidates[activeCandidateIndex]);
+      return;
+    }
+    if (event.key === "Escape") {
+      setCandidates([]);
+      setActiveCandidateIndex(-1);
+    }
   };
 
   const submitSearch = async (event: FormEvent) => {
     event.preventDefault();
-    if (candidates[0]) return selectCandidate(candidates[0]);
-    if (query.trim().length < 2) return;
+    const normalizedQuery = query.trim();
+    if (normalizedQuery.length < 2) return;
+
     setSearching(true);
+    setError(null);
     try {
-      const response = await fetch(`/api/lookup?q=${encodeURIComponent(query)}`);
-      const payload = (await response.json()) as
-        | (DiagnosisResult & { matchedAddress?: string })
-        | { message?: string };
-      if (!response.ok)
-        throw new Error(
-          "message" in payload && payload.message
-            ? payload.message
-            : "住所が見つかりません。",
-        );
-      const result = payload as DiagnosisResult & { matchedAddress?: string };
-      if (result.matchedAddress) setQuery(result.matchedAddress);
-      void diagnosePoint(result.point.lat, result.point.lng, {
-        move: true,
-        result,
-      });
+      await loadDossier(
+        { kind: "query", query: normalizedQuery },
+        { move: true },
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "検索に失敗しました。");
     } finally {
@@ -635,16 +771,22 @@ export default function MapApp() {
   const currentLocation = () => {
     if (!navigator.geolocation)
       return setError("この端末では現在地を取得できません。");
-    setDiagnosing(true);
+    const requestId = ++dossierRequestId.current;
+    dossierAbort.current?.abort();
+    setDossier(null);
+    setError(null);
+    setLoadingDossier(true);
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setDiagnosing(false);
-        void diagnosePoint(position.coords.latitude, position.coords.longitude, {
+        if (requestId !== dossierRequestId.current) return;
+        setLoadingDossier(false);
+        void loadDossier({ kind: "point", lat: position.coords.latitude, lng: position.coords.longitude }, {
           move: true,
         });
       },
       () => {
-        setDiagnosing(false);
+        if (requestId !== dossierRequestId.current) return;
+        setLoadingDossier(false);
         setError("位置情報の許可を確認してください。");
       },
       { enableHighAccuracy: true, timeout: 10_000 },
@@ -655,28 +797,14 @@ export default function MapApp() {
     () => MODES.find((entry) => entry.key === mode) ?? MODES[0],
     [mode],
   );
-  const displayedScore = diagnosis
-    ? mode === "theory"
-      ? diagnosis.theory.score
-      : mode === "modern"
-        ? diagnosis.modern.score
-        : diagnosis.combined.score
-    : 0;
-  const displayedLabel = diagnosis
-    ? mode === "theory"
-      ? diagnosis.theory.label
-      : mode === "modern"
-        ? diagnosis.modern.label
-        : diagnosis.combined.label
-    : "";
 
   return (
     <main className="map-app">
       <header className="top-shell">
         <div className="brand-row">
           <div>
-            <p className="eyebrow">TOKYO · YOKOHAMA · KAWASAKI</p>
-            <h1>土地の地形を、読み解く。</h1>
+            <p className="eyebrow">東京23区・横浜市・川崎市</p>
+            <h1>地図から、土地情報を全部見る。</h1>
           </div>
           <button
             className="round-button"
@@ -687,16 +815,31 @@ export default function MapApp() {
             i
           </button>
         </div>
-        <form className="search-box" onSubmit={submitSearch}>
+        <form className="search-box" data-testid="location-search" onSubmit={submitSearch}>
           <span aria-hidden="true">⌕</span>
           <input
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={candidates.length > 0}
+            aria-controls={candidates.length > 0 ? "location-suggestions" : undefined}
+            aria-activedescendant={
+              activeCandidateIndex >= 0
+                ? "location-suggestion-" + activeCandidateIndex
+                : undefined
+            }
             value={query}
             onChange={(event) => {
+              dossierRequestId.current += 1;
+              dossierAbort.current?.abort();
+              setLoadingDossier(false);
+              setDossier(null);
+              setError(null);
               setQuery(event.target.value);
               searchAddresses(event.target.value);
             }}
-            placeholder="住所・駅名・施設名を入力"
-            aria-label="住所を検索"
+            onKeyDown={handleSearchKeyDown}
+            placeholder="住所を入力（丁目・番地まで推奨）"
+            aria-label="住所を検索（丁目・番地まで推奨）"
           />
           {query && (
             <button
@@ -706,26 +849,40 @@ export default function MapApp() {
               onClick={() => {
                 setQuery("");
                 setCandidates([]);
+                setActiveCandidateIndex(-1);
+                if (searchTimer.current) {
+                  clearTimeout(searchTimer.current);
+                  searchTimer.current = null;
+                }
+                dossierRequestId.current += 1;
+                dossierAbort.current?.abort();
+                searchAbort.current?.abort();
+                setSearching(false);
+                setLoadingDossier(false);
+                setDossier(null);
+                setError(null);
               }}
             >
               ×
             </button>
           )}
-          <button className="search-submit" type="submit">
-            {searching ? "検索中" : "判定"}
+          <button className="search-submit" data-testid="location-search-submit" type="submit">
+            {searching ? "検索中" : "全情報を見る"}
           </button>
           {candidates.length > 0 && (
-            <div className="suggestions" role="listbox">
-              {candidates.map((candidate) => (
+            <div className="suggestions" id="location-suggestions" role="listbox">
+              {candidates.map((candidate, index) => (
                 <button
                   key={`${candidate.lat}-${candidate.lng}`}
+                  id={"location-suggestion-" + index}
                   type="button"
                   role="option"
-                  aria-selected="false"
+                  aria-selected={index === activeCandidateIndex}
                   onClick={() => selectCandidate(candidate)}
+                  onMouseEnter={() => setActiveCandidateIndex(index)}
                 >
                   <span>{candidate.label}</span>
-                  <small>この地点を診断</small>
+                  <small>この地点の全情報を見る</small>
                 </button>
               ))}
             </div>
@@ -747,7 +904,7 @@ export default function MapApp() {
       </header>
 
       <section className="map-stage" aria-label="土地判定地図">
-        <div ref={nodeRef} className="map-canvas" />
+        <div ref={nodeRef} className="map-canvas" data-testid="land-map" />
         <div className="map-status">
           <span className={`status-dot ${mode}`} />
           <span>
@@ -788,7 +945,7 @@ export default function MapApp() {
           <aside className="floating-panel layer-panel">
             <div className="panel-heading">
               <div>
-                <p className="eyebrow">SOURCE LAYERS</p>
+                <p className="eyebrow">参照レイヤー</p>
                 <h2>公式ハザードを重ねる</h2>
               </div>
               <button type="button" onClick={() => setLayersOpen(false)}>
@@ -822,7 +979,7 @@ export default function MapApp() {
           <aside className="floating-panel legend-panel">
             <div className="panel-heading">
               <div>
-                <p className="eyebrow">LEGEND</p>
+                <p className="eyebrow">地図の凡例</p>
                 <h2>{modeMeta.label}の見方</h2>
               </div>
               <button type="button" onClick={() => setLegendOpen(false)}>
@@ -839,6 +996,7 @@ export default function MapApp() {
             </div>
             {mode === "theory" && (
               <div className="classification-legend">
+                <strong>従来地形仮説の分類</strong>
                 {[
                   ["#0b7e69", "イヤシロ候補"],
                   ["#892247", "ケガレ候補"],
@@ -853,32 +1011,50 @@ export default function MapApp() {
                 ))}
               </div>
             )}
+            {mode !== "theory" && (
+              <div className="classification-legend">
+                <strong>資料不足の表示</strong>
+                <span>
+                  <i style={{ background: REVIEW_CELL_COLOR }} />
+                  資料不足・要確認（安全扱いしない）
+                </span>
+              </div>
+            )}
             <p className="panel-note">
               {mode === "theory"
-                ? "クオレガ4.5km圏と田園都市線の渋谷〜二子玉川・線路中心1km帯は、同じ100mロジックで事前計算済みです。"
+                ? "この色分けは、標高データから作った従来の地形仮説を見比べるための参考レイヤーです。凍結済みのV10正本そのものではありません。正本V10と現行V15.3は地点詳細で確認します。"
                 : "未取得データは安全とみなさず暫定表示します。"}
             </p>
           </aside>
         )}
       </section>
 
-      {(diagnosing || diagnosis || error) && (
-        <aside className="result-sheet" aria-live="polite">
+      {(loadingDossier || dossier || error) && (
+        <aside
+          ref={dossierSheetRef}
+          className="result-sheet dossier-sheet"
+          aria-live="polite"
+          aria-busy={loadingDossier}
+          data-testid="dossier-sheet"
+          tabIndex={-1}
+        >
           <div className="sheet-grabber" />
-          {diagnosing && (
-            <div className="loading-result">
+          {loadingDossier && (
+            <div className="loading-result" data-testid="dossier-loading">
               <span className="spinner" />
               <div>
-                <strong>地形と土地条件を解析中</strong>
-                <p>標高・水害・地盤の公式データを照合しています。</p>
+                <strong>この地点の情報を一枚にまとめています</strong>
+                <p>
+                  回避条件、イヤシロジ、龍脈、地形、水、地盤、歴史、周辺施設を照合中です。
+                </p>
               </div>
             </div>
           )}
-          {!diagnosing && error && (
-            <div className="error-result">
+          {!loadingDossier && error && (
+            <div className="error-result" data-testid="dossier-error">
               <div>
-                <p className="eyebrow">CHECK REQUIRED</p>
-                <strong>この地点は判定できませんでした</strong>
+                <p className="dossier-kicker">確認が必要です</p>
+                <strong>この地点の土地情報をまとめられませんでした</strong>
                 <p>{error}</p>
               </div>
               <button type="button" onClick={() => setError(null)}>
@@ -886,148 +1062,11 @@ export default function MapApp() {
               </button>
             </div>
           )}
-          {!diagnosing && diagnosis && (
-            <>
-              <div className="result-heading">
-                <div>
-                  <p className="eyebrow">{diagnosis.scope.name}</p>
-                  <h2>{displayedLabel}</h2>
-                  <p className="coordinate">
-                    {diagnosis.point.addressHint || diagnosis.point.coordinate}
-                  </p>
-                </div>
-                <div
-                  className="main-score"
-                  style={
-                    {
-                      "--score-color":
-                        mode === "theory"
-                          ? originalCellColor(
-                              diagnosis.theory.label,
-                              diagnosis.theory.originalScore,
-                            )
-                          : safetyColor(displayedScore),
-                    } as React.CSSProperties
-                  }
-                >
-                  <strong>{displayedScore}</strong>
-                  <span>/100</span>
-                </div>
-              </div>
-              <div className="terrain-score-grid">
-                <article className="original-judgement">
-                  <span>1　原典判定</span>
-                  <strong>{diagnosis.theory.originalScore}</strong>
-                  <small>{diagnosis.theory.label}</small>
-                  <em>原典適合 {diagnosis.theory.originalFit}/100</em>
-                </article>
-                <article>
-                  <span>2　補助地形点</span>
-                  <strong>{diagnosis.theory.auxiliaryTerrainScore}</strong>
-                  <small>相対標高・排水・傾斜</small>
-                </article>
-                <article className="detail-score-card">
-                  <span>3　地点詳細点</span>
-                  <strong>{diagnosis.theory.detailScore}</strong>
-                  <small>原典80%＋補助20%</small>
-                </article>
-                <article>
-                  <span>4　周辺点</span>
-                  <strong>
-                    {diagnosis.theory.neighborhoodScore ?? "—"}
-                  </strong>
-                  <small>
-                    {diagnosis.theory.neighborhoodScore === null
-                      ? "事前計算圏外"
-                      : "半径500m"}
-                  </small>
-                </article>
-                <article>
-                  <span>5　判定信頼度</span>
-                  <strong>{diagnosis.theory.internalConfidence}</strong>
-                  <small>線抽出と縮尺整合</small>
-                </article>
-              </div>
-              <article className="nearby-best-card">
-                <div>
-                  <span>6　近隣で最も高い場所</span>
-                  {diagnosis.theory.nearbyBest ? (
-                    <>
-                      <strong>
-                        地点詳細 {diagnosis.theory.nearbyBest.detailScore}
-                      </strong>
-                      <small>
-                        約{diagnosis.theory.nearbyBest.distanceMeters}m先・
-                        {diagnosis.theory.nearbyBest.label}
-                      </small>
-                    </>
-                  ) : (
-                    <>
-                      <strong>該当なし</strong>
-                      <small>1km以内に高信頼の候補なし</small>
-                    </>
-                  )}
-                </div>
-                {diagnosis.theory.nearbyBest && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void diagnosePoint(
-                        diagnosis.theory.nearbyBest!.lat,
-                        diagnosis.theory.nearbyBest!.lng,
-                        { move: true },
-                      )
-                    }
-                  >
-                    地図で見る
-                  </button>
-                )}
-              </article>
-              <div className="secondary-score-row">
-                <span>
-                  現代的土地条件 <strong>{diagnosis.modern.score}</strong>
-                  <small>{diagnosis.modern.label}</small>
-                </span>
-                <span>
-                  住むなら総合 <strong>{diagnosis.combined.score}</strong>
-                  <small>{diagnosis.combined.label}</small>
-                </span>
-              </div>
-              <details className="reason-details" open>
-                <summary>この判定になった理由</summary>
-                <div className="reason-columns">
-                  <div>
-                    <h3>イヤシロ仮説</h3>
-                    <ul>
-                      {diagnosis.theory.reasons.map((reason) => (
-                        <li key={reason}>{reason}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div>
-                    <h3>現代的土地条件</h3>
-                    <ul>
-                      {diagnosis.modern.reasons.map((reason) => (
-                        <li key={reason}>{reason}</li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              </details>
-              <div className="result-actions">
-                <a
-                  href={`/api/diagnose?lat=${diagnosis.point.lat}&lng=${diagnosis.point.lng}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  AI・JSON用の結果を開く
-                </a>
-                <button type="button" onClick={() => setDiagnosis(null)}>
-                  閉じる
-                </button>
-              </div>
-              <p className="disclaimer">{diagnosis.disclaimer}</p>
-            </>
+          {!loadingDossier && dossier && (
+            <LandDossierPanel
+              dossier={dossier}
+              onClose={() => setDossier(null)}
+            />
           )}
         </aside>
       )}
@@ -1042,10 +1081,10 @@ export default function MapApp() {
           >
             <div className="panel-heading">
               <div>
-                <p className="eyebrow">ABOUT THIS MAP</p>
+                <p className="eyebrow">この地図について</p>
                 <h2 id="info-title">判定方法と使い方</h2>
               </div>
-              <button type="button" onClick={() => setInfoOpen(false)}>
+              <button type="button" aria-label="説明を閉じる" onClick={() => setInfoOpen(false)}>
                 ×
               </button>
             </div>
@@ -1053,39 +1092,40 @@ export default function MapApp() {
               <article>
                 <span>01</span>
                 <div>
-                  <h3>イヤシロ仮説</h3>
+                  <h3>土地そのものは二本柱で見る</h3>
                   <p>
-                    300m、1km、3kmの3縮尺で高位指向線・低位指向線を抽出。高位×高位をイヤシロチ候補、低位×低位をケガレチ候補、高位×低位を普通地として原典判定します。クオレガ4.5km圏6,361区画と、田園都市線の渋谷〜二子玉川・線路中心1km帯2,109区画を100m間隔で事前計算済みです。
+                    一本目は「イヤシロジ＝テライン仮説」です。地点詳細では、現在版の V15.3 と凍結済みの V10 正本を並べます。二本目は「龍脈」です。この二つを別の軸として並べ、どちらがどう評価されているかを確認できます。
                   </p>
                 </div>
               </article>
               <article>
                 <span>02</span>
                 <div>
-                  <h3>現代的土地条件</h3>
+                  <h3>最初に、絶対に避けたい条件を確認</h3>
                   <p>
-                    洪水・内水・高潮・津波・土砂災害・傾斜・J-SHIS地盤・明治期低湿地を照合。未着色を安全とは扱いません。
+                    寺院・墓地・死亡を扱う病院などとの距離や、歴史上の大規模な死亡・収容に関わる場所を先に確認します。500mを基準にし、資料がない場合は「問題なし」にせず「情報不足」と表示します。
                   </p>
                 </div>
               </article>
               <article>
                 <span>03</span>
                 <div>
-                  <h3>住むなら総合</h3>
+                  <h3>根拠を五つに分けて全部表示</h3>
                   <p>
-                    原典判定とは分離して現代的条件を主軸に評価します。地点詳細点は原典ロジック80%＋補助地形20%で、周辺点・判定信頼度・1km以内の最高評価地点も表示します。
+                    地形、水、地盤、歴史、周辺施設の順に、分かっていること、該当しなかったこと、まだ分からないことを日本語で説明します。地名の由来と、次に集めるべき不足情報も同じ画面で確認できます。
                   </p>
                 </div>
               </article>
               <article>
                 <span>AI</span>
                 <div>
-                  <h3>AIからも取得</h3>
+                  <h3>AIからも同じ全情報を取得</h3>
                   <p>
-                    <code>/api/lookup?q=住所</code> または{" "}
-                    <code>/api/diagnose?lat=緯度&amp;lng=経度</code>{" "}
-                    でJSONを取得できます。{" "}
-                    <a href="/openapi.json" target="_blank" rel="noreferrer">
+                    地図クリックも住所検索も、最終的には
+                    <code>/api/v3/dossier?q=住所</code> または{" "}
+                    <code>/api/v3/dossier?lat=緯度&amp;lng=経度</code>
+                    から同じ形式のJSONを取得します。{" "}
+                    <a href="/openapi-v3.json" target="_blank" rel="noreferrer">
                       OpenAPI仕様
                     </a>
                   </p>

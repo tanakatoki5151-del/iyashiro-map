@@ -49,10 +49,8 @@ test("renders the Japanese map experience", async () => {
   assert.equal(response.status, 200);
   assert.match(html, /イヤシロ土地判定マップ/);
   assert.match(html, /東京23区・横浜市・川崎市/);
-  assert.match(
-    html,
-    /クオレガ4\.5km圏と田園都市線沿線の100m事前計算色を表示しています/,
-  );
+  assert.match(html, /従来の地形仮説を見比べるための参考地図です/);
+  assert.match(html, /凍結V10正本と現行V15\.3/);
 });
 
 test("ships the instant wide-area colour overlay", async () => {

@@ -14,6 +14,9 @@ It keeps empirical risk, research proxies, traditional lenses, and missing evide
 - Lenses: R3, V15.3, RYUMYAK, ORBIT, history/P8, and bounded HOUSE COMPASS LAB context.
 - Failure semantics: UNKNOWN, PARTIAL, unavailable, and out-of-scope are never presented as safe.
 - Comparison: up to 20 candidates using short-lived, current-release-bound signed tokens without raw HCL or listing PII.
+- Root map: a clicked pin and an address both open the same `/api/v3/dossier` land dossier.
+- Pillar 1 is イヤシロジ（＝テライン仮説）with current V15.3 and comparison-only V10; pillar 2 is independent 龍脈. Their ranks are never averaged.
+- The dossier then explains terrain, water, ground, history, nearby facilities, place-name origin, and missing evidence in Japanese. Missing evidence is not safety.
 
 Contracts and operations are documented in `docs/INTEGRATED_API_V3.md`, `docs/INTEGRATED_API_DATA_CONTRACT.md`, and `public/openapi-v3.json`.
 
@@ -25,12 +28,12 @@ Protected Vercel previews may use the documented deployment-scoped HKDF fallback
 - 地図を開くと、クオレガ東京本社4.5km圏の6,361区画に加え、田園都市線の
   渋谷〜二子玉川・線路中心1km帯の2,109区画を100m間隔で事前計算した
   色分けを静的PNGとして即時表示します。
-- ズーム14以上では、同じ事前計算データから100m区画を重ね、クリック時に
-  原典判定、補助地形点、地点詳細点、周辺点、判定信頼度、近隣最高地点を
-  表示します。
-- 地点クリックと住所検索は `/api/diagnose` または `/api/lookup` を使い、
-  事前計算圏内では保存済み地形を、それ以外では300m・1km・3kmのライブ
-  地形解析を使用し、公式ハザードデータと照合します。
+- ズーム14以上では、同じ事前計算データから100m区画を重ねます。地点を
+  クリックするとピンを立て、その地点の総合土地カルテを開きます。
+- 地点クリックと住所検索は、どちらも `/api/v3/dossier` を使います。
+  絶対回避条件、イヤシロジ（V15.3・比較用V10）、独立した龍脈、地形、水、
+  地盤、歴史、周辺施設、地名由来、まだ足りない情報を同じ順序で表示します。
+  取得できない情報は「安全」へ読み替えません。
 - 広域色分けの行政区域マスクは国土交通省「国土数値情報 行政区域データ
   2025年版」、標高は国土地理院DEMを使用しています。
 

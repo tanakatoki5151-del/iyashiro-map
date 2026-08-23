@@ -32,7 +32,6 @@ const initialForm: FormState = {
 const layerLabels: Record<string, string> = {
   placeGraph: "歴史・場所の履歴",
   v10Legacy: "土地履歴",
-  v11Terrain: "歴史・地形",
   veil: "重大履歴・伝承",
   underland: "地下・水",
   limen: "祭祀・境界",
@@ -160,7 +159,12 @@ export default function NexusClient() {
     }
   };
 
-  const layers = profile ? (Object.values(profile.layers).filter(Boolean) as LocationLayer[]) : [];
+  const layers = profile
+    ? Object.values(profile.layers).filter(
+        (layer): layer is LocationLayer =>
+          Boolean(layer) && layer?.layerId !== "v11Terrain",
+      )
+    : [];
   const market = assessment?.marketContext;
 
   return (
