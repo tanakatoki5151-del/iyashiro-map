@@ -1,0 +1,288 @@
+name: ECOSCAPE F18 Full-Domain Environment Cards
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/ecoscape-f18-environment-cards
+    paths:
+      - research/ecoscape-environment-cards/**
+      - .github/workflows/ecoscape-f18-environment-cards.yml
+
+permissions:
+  contents: read
+
+env:
+  B114_DRIVE_ID: 1BCV_ejXTy2JIdIAJkecSNcLrscef7lTu
+  B114_SHA256: bc179f4c4dfc88b37040765d77074306257d4ff7165b45f68f823750dd866b12
+  B120_DRIVE_ID: 1qOqlGpY3iZK-kSuuqr7QaTpWJnslvNaI
+  B120_SHA256: add1d47e2b06b12ad8fbc69027a3cb50d18c867b044583576a6d2536822e47c1
+  AS_OF_DATE: 2026-08-24
+  F18_CODE_DRIVE_ID: 1WhSA_OXavMQLf3W-sc5BXlh0c9d5M7j-
+  F18_CODE_SHA256: 6ce559b862b581de70d993c00a804ea3b40c4adc6c929b4db39fe1acd825aba2
+
+jobs:
+  temporal-year:
+    name: Temporal year ${{ matrix.year }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        year: [2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Download and verify canonical F18 code
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/f18-code
+          curl --fail --location --retry 6 --retry-delay 4             "https://drive.usercontent.google.com/download?id=${F18_CODE_DRIVE_ID}&export=download&confirm=t"             -o /tmp/f18-code/code.zip
+          echo "${F18_CODE_SHA256}  /tmp/f18-code/code.zip" | sha256sum -c -
+          unzip -q /tmp/f18-code/code.zip -d /tmp/f18-code
+
+      - name: Install acquisition dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install             numpy==2.2.6             pandas==2.3.2             pyarrow==21.0.0             rasterio==1.4.3             pyproj==3.7.2             pystac==1.13.0             pystac-client==0.9.0             planetary-computer==1.0.0
+
+      - name: Download and verify canonical B120
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ecoscape-source /tmp/ecoscape-year
+          curl --fail --location --retry 6 --retry-delay 4             "https://drive.usercontent.google.com/download?id=${B120_DRIVE_ID}&export=download&confirm=t"             -o /tmp/ecoscape-source/b120.zip
+          echo "${B120_SHA256}  /tmp/ecoscape-source/b120.zip" | sha256sum -c -
+
+      - name: Build annual full-domain temporal payload
+        env:
+          GDAL_HTTP_MAX_RETRY: "5"
+          GDAL_HTTP_RETRY_DELAY: "2"
+          CPL_CURL_VERBOSE: "NO"
+        run: |
+          python /tmp/f18-code/f18_full_domain_temporal.py             --year "${{ matrix.year }}"             --b120 /tmp/ecoscape-source/b120.zip             --output /tmp/ecoscape-year             --as-of "${AS_OF_DATE}"             --s2-per-tile 3             --landsat-per-pathrow 5
+
+      - name: Validate annual contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import pandas as pd
+
+          year = int("${{ matrix.year }}")
+          root = Path("/tmp/ecoscape-year")
+          payload = root / f"ECOSCAPE_TEMPORAL_{year}_120662.parquet"
+          audit = root / f"ECOSCAPE_TEMPORAL_AUDIT_{year}.json"
+          frame = pd.read_parquet(payload)
+          data = json.loads(audit.read_text())
+          assert len(frame) == 120662
+          assert frame.canonicalCellId.nunique() == 120662
+          assert data["duplicateCellIds"] == 0
+          if year <= 2025:
+              usable = int((frame.peak_summer_valid_scene_count > 0).sum())
+              if usable < 100000:
+                  raise SystemExit(
+                      f"Peak-summer usable cells too low for {year}: {usable}"
+                  )
+          print(json.dumps({
+              "year": year,
+              "rows": len(frame),
+              "sentinelItems": data["sentinelSelectedItems"],
+              "landsatItems": data["landsatSelectedItems"],
+              "errors": len(data["errors"]),
+          }, indent=2))
+          PY
+          cd /tmp/ecoscape-year
+          find . -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ecoscape-f18-temporal-${{ matrix.year }}
+          path: /tmp/ecoscape-year
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
+
+  merge-cards:
+    name: Merge temporal evidence and build 120,662 cards
+    needs: temporal-year
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Download and verify canonical F18 code
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/f18-code
+          curl --fail --location --retry 6 --retry-delay 4             "https://drive.usercontent.google.com/download?id=${F18_CODE_DRIVE_ID}&export=download&confirm=t"             -o /tmp/f18-code/code.zip
+          echo "${F18_CODE_SHA256}  /tmp/f18-code/code.zip" | sha256sum -c -
+          unzip -q /tmp/f18-code/code.zip -d /tmp/f18-code
+
+      - name: Install card-build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install             numpy==2.2.6             pandas==2.3.2             pyarrow==21.0.0             scipy==1.16.1
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ecoscape-f18-temporal-*
+          path: /tmp/ecoscape-temporal
+          merge-multiple: true
+
+      - name: Download and verify B114 and B120
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ecoscape-source /tmp/ecoscape-cards
+          curl --fail --location --retry 6 --retry-delay 4             "https://drive.usercontent.google.com/download?id=${B114_DRIVE_ID}&export=download&confirm=t"             -o /tmp/ecoscape-source/b114.zip
+          curl --fail --location --retry 6 --retry-delay 4             "https://drive.usercontent.google.com/download?id=${B120_DRIVE_ID}&export=download&confirm=t"             -o /tmp/ecoscape-source/b120.zip
+          echo "${B114_SHA256}  /tmp/ecoscape-source/b114.zip" | sha256sum -c -
+          echo "${B120_SHA256}  /tmp/ecoscape-source/b120.zip" | sha256sum -c -
+
+      - name: Build full environment-card release
+        run: |
+          python /tmp/f18-code/f18_build_cards.py             --b114 /tmp/ecoscape-source/b114.zip             --b120 /tmp/ecoscape-source/b120.zip             --temporal-dir /tmp/ecoscape-temporal             --output /tmp/ecoscape-cards
+
+      - name: Write release report and integrity manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/ecoscape-cards/ECOSCAPE_ENVIRONMENT_CARDS_F18_REPORT.md <<'EOF'
+          # ECOSCAPE Environment Cards F18
+
+          F18 attaches one explainable environment card to every one of the
+          120,662 canonical cells.
+
+          ## Included evidence
+
+          - Sentinel-2 2019-2025 full-year phenology plus 2026 partial year
+          - spring, early summer, peak summer, autumn recovery and winter diagnostic
+          - multi-year NDVI/EVI/NDMI/NDRE vitality, stability, trend, stress and recovery
+          - Landsat multi-summer surface temperature and local 500m anomaly
+          - B114 four-pillar static ecology/thermal/land-use/urban evidence
+          - B120 official area, UNDERLAND water/moisture and magnetic context
+          - eight-direction 500m urban-form ventilation potential
+          - 100m cell plus 300m and 500m temporal context
+          - Japanese headline, short summary and detailed 3-4 minute card narrative
+          - explicit confidence, UNKNOWN fields and recommended checks
+
+          ## Interpretation locks
+
+          - This is a descriptive card release, not a ranking release.
+          - `rankingEffect=none`, `scoringEffect=none`, `candidateOverride=0`.
+          - High moisture alone never means wet-heavy.
+          - Ventilation is a shape-based potential, not measured wind.
+          - Magnetic high/low is never translated into good/bad.
+          - Cleanliness, measured wind and indoor humidity remain outside scope.
+          EOF
+          sed -i 's/^          //' /tmp/ecoscape-cards/ECOSCAPE_ENVIRONMENT_CARDS_F18_REPORT.md
+
+          cd /tmp/ecoscape-cards
+          find . -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          zip -q -9 -r             /tmp/ECOSCAPE_ENVIRONMENT_CARDS_F18_20260824.zip             .
+          sha256sum /tmp/ECOSCAPE_ENVIRONMENT_CARDS_F18_20260824.zip             > /tmp/ECOSCAPE_ENVIRONMENT_CARDS_F18_20260824.zip.sha256
+
+          cd /tmp/ecoscape-temporal
+          find . -type f -print0 | sort -z | xargs -0 sha256sum             > /tmp/ECOSCAPE_TEMPORAL_F17_SHA256SUMS.txt
+          zip -q -6 -r             /tmp/ECOSCAPE_TEMPORAL_F17_2019_2026_20260824.zip             .
+          sha256sum /tmp/ECOSCAPE_TEMPORAL_F17_2019_2026_20260824.zip             > /tmp/ECOSCAPE_TEMPORAL_F17_2019_2026_20260824.zip.sha256
+
+      - name: Final readback gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import sqlite3
+          import zipfile
+          from pathlib import Path
+          import pandas as pd
+
+          root = Path("/tmp/ecoscape-cards")
+          audit = json.loads(
+              (root / "ECOSCAPE_ENVIRONMENT_CARD_AUDIT_F18.json").read_text()
+          )
+          assert audit["cells"] == 120662
+          assert audit["duplicateCellIds"] == 0
+          assert audit["rankingEffect"] == "none"
+          assert audit["scoringEffect"] == "none"
+          assert audit["candidateOverride"] == 0
+
+          frame = pd.read_parquet(
+              root / "ECOSCAPE_ENVIRONMENT_CARDS_120662_F18.parquet",
+              columns=[
+                  "canonicalCellId",
+                  "summaryHeadlineJa",
+                  "summaryDetailedJa",
+                  "temporalConfidence",
+                  "magneticContextLabel",
+              ],
+          )
+          assert len(frame) == 120662
+          assert frame.canonicalCellId.nunique() == 120662
+          assert frame.summaryHeadlineJa.notna().all()
+          assert frame.summaryDetailedJa.str.len().median() > 200
+
+          connection = sqlite3.connect(
+              root / "ECOSCAPE_ENVIRONMENT_CARDS_120662_F18.sqlite"
+          )
+          count = connection.execute(
+              "SELECT COUNT(*) FROM ecoscape_environment_cards"
+          ).fetchone()[0]
+          sample = connection.execute(
+              "SELECT canonicalCellId, summaryHeadlineJa "
+              "FROM ecoscape_environment_cards WHERE canonicalCellId='g130-240'"
+          ).fetchone()
+          connection.close()
+          assert count == 120662
+          assert sample is not None
+
+          with zipfile.ZipFile(
+              "/tmp/ECOSCAPE_ENVIRONMENT_CARDS_F18_20260824.zip"
+          ) as archive:
+              assert archive.testzip() is None
+
+          print(json.dumps({
+              "rows": len(frame),
+              "medianNarrativeChars": float(
+                  frame.summaryDetailedJa.str.len().median()
+              ),
+              "confidence": audit["temporalConfidence"],
+              "sample": sample,
+          }, ensure_ascii=False, indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ecoscape-environment-cards-f18-final
+          path: |
+            /tmp/ECOSCAPE_ENVIRONMENT_CARDS_F18_20260824.zip
+            /tmp/ECOSCAPE_ENVIRONMENT_CARDS_F18_20260824.zip.sha256
+            /tmp/ECOSCAPE_TEMPORAL_F17_2019_2026_20260824.zip
+            /tmp/ECOSCAPE_TEMPORAL_F17_2019_2026_20260824.zip.sha256
+            /tmp/ECOSCAPE_TEMPORAL_F17_SHA256SUMS.txt
+            /tmp/ecoscape-cards/ECOSCAPE_ENVIRONMENT_CARD_AUDIT_F18.json
+            /tmp/ecoscape-cards/ECOSCAPE_ENVIRONMENT_CARD_SCHEMA_F18.json
+            /tmp/ecoscape-cards/ECOSCAPE_ENVIRONMENT_CARD_SAMPLES_F18.json
+            /tmp/ecoscape-cards/ECOSCAPE_ENVIRONMENT_CARDS_F18_REPORT.md
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
