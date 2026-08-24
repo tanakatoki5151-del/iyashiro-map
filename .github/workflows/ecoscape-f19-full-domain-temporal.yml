@@ -1,0 +1,196 @@
+name: ECOSCAPE F19 Full-Domain Temporal Cards
+
+on:
+  push:
+    branches:
+      - agent/ecoscape-green-quality-p1
+    paths:
+      - .github/workflows/ecoscape-f19-full-domain-temporal.yml
+      - research/ecoscape-green-quality/f19_full_domain_temporal.py
+      - research/ecoscape-green-quality/f19_aggregate_temporal.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  temporal-shards:
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install geospatial runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            gdown==5.2.0 \
+            numpy==2.2.6 \
+            pandas==2.3.2 \
+            pyproj==3.7.2 \
+            rasterio==1.4.3 \
+            pystac==1.13.0 \
+            pystac-client==0.9.0 \
+            planetary-computer==1.0.0
+
+      - name: Download Drive-canonical F17/F19 contract folder
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/f17-drive
+          python - <<'PY'
+          import gdown
+          result=gdown.download_folder(
+              url='https://drive.google.com/drive/folders/1bdGSEG-nJKsMNqfuhTzV8vYDKkrLk-x6',
+              output='/tmp/f17-drive',
+              quiet=False,
+              use_cookies=False,
+              remaining_ok=True,
+          )
+          if not result:
+              raise SystemExit('F17 Drive folder download failed')
+          PY
+          contract=$(find /tmp/f17-drive -name ECOSCAPE_F19_GRID_CONTRACT_V1.json -print -quit)
+          test -n "$contract"
+          cp "$contract" /tmp/ECOSCAPE_F19_GRID_CONTRACT_V1.json
+
+      - name: Run one broad spatial shard
+        env:
+          ECOSCAPE_F19_GRID_CONTRACT: /tmp/ECOSCAPE_F19_GRID_CONTRACT_V1.json
+          ECOSCAPE_F19_OUTPUT: ${{ github.workspace }}/research/ecoscape-green-quality/output-f19-${{ matrix.shard }}
+          ECOSCAPE_F19_SHARD_INDEX: ${{ matrix.shard }}
+          ECOSCAPE_F19_SHARD_COUNT: '32'
+          ECOSCAPE_F19_YEAR_START: '2019'
+          ECOSCAPE_F19_YEAR_END: '2026'
+          ECOSCAPE_F19_MAX_S2_DATES: '2'
+          ECOSCAPE_F19_MAX_LANDSAT_DATES: '3'
+          GDAL_HTTP_MAX_RETRY: '6'
+          GDAL_HTTP_RETRY_DELAY: '4'
+          CPL_VSIL_CURL_CACHE_SIZE: '50000000'
+        run: python research/ecoscape-green-quality/f19_full_domain_temporal.py
+
+      - name: Validate shard locks
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          shard=int(os.environ['SHARD'])
+          p=Path(f'research/ecoscape-green-quality/output-f19-{shard}/F19_AUDIT_SHARD_{shard:02d}.json')
+          a=json.loads(p.read_text())
+          print(json.dumps(a,ensure_ascii=False,indent=2))
+          assert a['cells'] > 0
+          assert a['sentinelRows'] > 0
+          assert a['landsatRows'] > 0
+          assert a['rankingEffect'] == 'none'
+          assert a['scoringEffect'] == 'none'
+          assert a['candidateOverride'] == 0
+          PY
+
+      - name: Add shard hashes
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          cd research/ecoscape-green-quality/output-f19-${SHARD}
+          find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ecoscape-f19-shard-${{ matrix.shard }}
+          path: research/ecoscape-green-quality/output-f19-${{ matrix.shard }}
+          if-no-files-found: error
+          retention-days: 30
+
+  aggregate:
+    needs: temporal-shards
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install gdown==5.2.0 numpy==2.2.6 pandas==2.3.2 scipy==1.16.1
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ecoscape-f19-shard-*
+          path: /tmp/ecoscape-f19-shards
+      - name: Download compact canonical grid manifest
+        run: |
+          python - <<'PY'
+          import gdown
+          result=gdown.download_folder(
+              url='https://drive.google.com/drive/folders/1bdGSEG-nJKsMNqfuhTzV8vYDKkrLk-x6',
+              output='/tmp/f17-drive', quiet=False, use_cookies=False, remaining_ok=True)
+          if not result: raise SystemExit('Drive download failed')
+          PY
+          grid=$(find /tmp/f17-drive -name ECOSCAPE_CANONICAL_CELLS_120662_F19.csv.gz -print -quit)
+          if [ -z "$grid" ]; then
+            echo 'Coordinate CSV not found; reconstruct it from the compact grid contract.'
+            contract=$(find /tmp/f17-drive -name ECOSCAPE_F19_GRID_CONTRACT_V1.json -print -quit)
+            python - "$contract" <<'PY'
+          import json,sys,pandas as pd
+          from pyproj import Transformer
+          c=json.load(open(sys.argv[1]))
+          rows=[]
+          for e in c['validRows']:
+            for a,b in e['colRanges']:
+              rows += [(int(e['row']),x) for x in range(int(a),int(b)+1)]
+          d=pd.DataFrame(rows,columns=['gridRow','gridCol'])
+          d['canonicalCellId']='g'+d.gridRow.astype(str)+'-'+d.gridCol.astype(str)
+          ax=c['affine']['x']; ay=c['affine']['y']
+          d['x']=ax['constant']+ax['gridRow']*d.gridRow+ax['gridCol']*d.gridCol
+          d['y']=ay['constant']+ay['gridRow']*d.gridRow+ay['gridCol']*d.gridCol
+          lon,lat=Transformer.from_crs(c['crs'],4326,always_xy=True).transform(d.x,d.y)
+          d['latitude']=lat; d['longitude']=lon
+          d.to_csv('/tmp/ECOSCAPE_CANONICAL_CELLS_120662_F19.csv.gz',index=False,compression='gzip')
+          PY
+            grid=/tmp/ECOSCAPE_CANONICAL_CELLS_120662_F19.csv.gz
+          fi
+          echo "$grid" > /tmp/grid_path.txt
+      - name: Aggregate all 120,662 cells
+        run: |
+          grid=$(cat /tmp/grid_path.txt)
+          python research/ecoscape-green-quality/f19_aggregate_temporal.py \
+            --input /tmp/ecoscape-f19-shards \
+            --grid "$grid" \
+            --output research/ecoscape-green-quality/F19_FULL_DOMAIN_FINAL
+      - name: Validate final temporal release
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('research/ecoscape-green-quality/F19_FULL_DOMAIN_FINAL/ECOSCAPE_F19_TEMPORAL_AUDIT.json')
+          a=json.loads(p.read_text())
+          print(json.dumps(a,ensure_ascii=False,indent=2))
+          assert a['rows'] == 120662
+          assert a['uniqueCells'] == 120662
+          assert a['measuredCells'] > 100000
+          assert a['rankingEffect'] == 'none'
+          assert a['scoringEffect'] == 'none'
+          assert a['candidateOverride'] == 0
+          PY
+      - name: Add source, hashes and package
+        run: |
+          cp research/ecoscape-green-quality/f19_full_domain_temporal.py research/ecoscape-green-quality/F19_FULL_DOMAIN_FINAL/
+          cp research/ecoscape-green-quality/f19_aggregate_temporal.py research/ecoscape-green-quality/F19_FULL_DOMAIN_FINAL/
+          cd research/ecoscape-green-quality/F19_FULL_DOMAIN_FINAL
+          find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          cd ..
+          zip -r ECOSCAPE_F19_FULL_DOMAIN_TEMPORAL_120662_20260825.zip F19_FULL_DOMAIN_FINAL
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ecoscape-f19-full-domain-temporal-120662
+          path: research/ecoscape-green-quality/ECOSCAPE_F19_FULL_DOMAIN_TEMPORAL_120662_20260825.zip
+          if-no-files-found: error
+          retention-days: 30
