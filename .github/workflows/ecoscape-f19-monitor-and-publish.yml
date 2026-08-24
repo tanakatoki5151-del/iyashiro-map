@@ -1,0 +1,95 @@
+name: ECOSCAPE F19 Monitor and Publish Result
+
+on:
+  push:
+    branches:
+      - agent/ecoscape-green-quality-p1
+    paths:
+      - .github/workflows/ecoscape-f19-monitor-and-publish.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 420
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      BRANCH: agent/ecoscape-green-quality-p1
+      WORKFLOW: ecoscape-f19-full-domain-temporal.yml
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/ecoscape-green-quality-p1
+          fetch-depth: 0
+
+      - name: Wait for latest F19 run
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/f19-monitor
+          for attempt in $(seq 1 400); do
+            gh api "repos/${REPO}/actions/workflows/${WORKFLOW}/runs?branch=${BRANCH}&per_page=1" > /tmp/f19-monitor/runs.json
+            run_id=$(jq -r '.workflow_runs[0].id // empty' /tmp/f19-monitor/runs.json)
+            status=$(jq -r '.workflow_runs[0].status // empty' /tmp/f19-monitor/runs.json)
+            conclusion=$(jq -r '.workflow_runs[0].conclusion // empty' /tmp/f19-monitor/runs.json)
+            echo "attempt=${attempt} run=${run_id} status=${status} conclusion=${conclusion}"
+            if [ -n "$run_id" ] && [ "$status" = "completed" ]; then
+              echo "$run_id" > /tmp/f19-monitor/run_id.txt
+              echo "$conclusion" > /tmp/f19-monitor/conclusion.txt
+              break
+            fi
+            sleep 60
+          done
+          test -s /tmp/f19-monitor/run_id.txt
+
+      - name: Capture run, jobs and artifact evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_id=$(cat /tmp/f19-monitor/run_id.txt)
+          conclusion=$(cat /tmp/f19-monitor/conclusion.txt)
+          gh api "repos/${REPO}/actions/runs/${run_id}" > /tmp/f19-monitor/run.json
+          gh api "repos/${REPO}/actions/runs/${run_id}/jobs?per_page=100" > /tmp/f19-monitor/jobs.json
+          gh api "repos/${REPO}/actions/runs/${run_id}/artifacts" > /tmp/f19-monitor/artifacts.json
+          artifact_id=$(jq -r '.artifacts[] | select(.name=="ecoscape-f19-full-domain-temporal-120662") | .id' /tmp/f19-monitor/artifacts.json | head -1)
+          mkdir -p research/ecoscape-green-quality/f19-result
+          if [ "$conclusion" = "success" ] && [ -n "$artifact_id" ]; then
+            gh api "repos/${REPO}/actions/artifacts/${artifact_id}/zip" > /tmp/f19-monitor/artifact.zip
+            unzip -q /tmp/f19-monitor/artifact.zip -d /tmp/f19-monitor/artifact
+            nested=$(find /tmp/f19-monitor/artifact -name 'ECOSCAPE_F19_FULL_DOMAIN_TEMPORAL_120662_20260825.zip' -print -quit)
+            test -n "$nested"
+            sha=$(sha256sum "$nested" | awk '{print $1}')
+            unzip -p "$nested" 'F19_FULL_DOMAIN_FINAL/ECOSCAPE_F19_TEMPORAL_AUDIT.json' > research/ecoscape-green-quality/f19-result/ECOSCAPE_F19_TEMPORAL_AUDIT.json
+            cp /tmp/f19-monitor/run.json research/ecoscape-green-quality/f19-result/GITHUB_RUN_RECEIPT.json
+            cp /tmp/f19-monitor/artifacts.json research/ecoscape-green-quality/f19-result/GITHUB_ARTIFACT_RECEIPT.json
+            jq -n \
+              --argjson runId "$run_id" \
+              --argjson artifactId "$artifact_id" \
+              --arg conclusion "$conclusion" \
+              --arg sha256 "$sha" \
+              --arg branch "$BRANCH" \
+              '{buildId:"ecoscape-f19-full-domain-temporal-v1",runId:$runId,artifactId:$artifactId,conclusion:$conclusion,sha256:$sha,branch:$branch,rankingEffect:"none",scoringEffect:"none",candidateOverride:0}' \
+              > research/ecoscape-green-quality/F19_LATEST_RESULT.json
+          else
+            failed=$(jq '[.jobs[] | select(.conclusion != "success") | {id,name,status,conclusion}]' /tmp/f19-monitor/jobs.json)
+            jq -n \
+              --argjson runId "$run_id" \
+              --arg conclusion "$conclusion" \
+              --argjson failedJobs "$failed" \
+              '{buildId:"ecoscape-f19-full-domain-temporal-v1",runId:$runId,conclusion:$conclusion,failedJobs:$failedJobs,releaseState:"FAILED_OR_NO_FINAL_ARTIFACT",rankingEffect:"none",scoringEffect:"none",candidateOverride:0}' \
+              > research/ecoscape-green-quality/F19_LATEST_RESULT.json
+          fi
+
+      - name: Commit canonical result receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add research/ecoscape-green-quality/F19_LATEST_RESULT.json research/ecoscape-green-quality/f19-result
+          git commit -m 'Record ECOSCAPE F19 full-domain temporal result [skip ci]' || exit 0
+          git push origin HEAD:agent/ecoscape-green-quality-p1
