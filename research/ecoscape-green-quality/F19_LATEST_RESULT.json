@@ -1,0 +1,209 @@
+{
+  "buildId": "ecoscape-f19-full-domain-temporal-v1",
+  "runId": 32756297535,
+  "conclusion": "failure",
+  "failedJobs": [
+    {
+      "id": 97524519267,
+      "name": "temporal-shards (7)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524519407,
+      "name": "temporal-shards (14)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524519472,
+      "name": "temporal-shards (2)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524519534,
+      "name": "temporal-shards (16)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524519554,
+      "name": "temporal-shards (12)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524519596,
+      "name": "temporal-shards (10)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524519600,
+      "name": "temporal-shards (15)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524519602,
+      "name": "temporal-shards (1)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524519606,
+      "name": "temporal-shards (5)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524519623,
+      "name": "temporal-shards (8)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524519626,
+      "name": "temporal-shards (11)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524519627,
+      "name": "temporal-shards (4)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524519652,
+      "name": "temporal-shards (6)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524519675,
+      "name": "temporal-shards (3)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524519702,
+      "name": "temporal-shards (0)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524519706,
+      "name": "temporal-shards (9)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524519731,
+      "name": "temporal-shards (17)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524519828,
+      "name": "temporal-shards (13)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524521015,
+      "name": "temporal-shards (19)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524521071,
+      "name": "temporal-shards (21)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524521075,
+      "name": "temporal-shards (18)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524521108,
+      "name": "temporal-shards (22)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524521140,
+      "name": "temporal-shards (20)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524521145,
+      "name": "temporal-shards (23)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524521199,
+      "name": "temporal-shards (24)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524521272,
+      "name": "temporal-shards (26)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524521348,
+      "name": "temporal-shards (25)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524521377,
+      "name": "temporal-shards (27)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524522071,
+      "name": "temporal-shards (29)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524522150,
+      "name": "temporal-shards (28)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524522313,
+      "name": "temporal-shards (30)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97524522415,
+      "name": "temporal-shards (31)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 97578598070,
+      "name": "aggregate",
+      "status": "completed",
+      "conclusion": "skipped"
+    }
+  ],
+  "releaseState": "FAILED_OR_NO_FINAL_ARTIFACT",
+  "rankingEffect": "none",
+  "scoringEffect": "none",
+  "candidateOverride": 0
+}

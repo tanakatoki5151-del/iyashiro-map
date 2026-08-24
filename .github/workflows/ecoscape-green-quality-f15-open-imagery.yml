@@ -1,0 +1,131 @@
+name: ECOSCAPE F15 Open Imagery Fallback
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/ecoscape-green-quality-f15-open-imagery.yml
+      - research/ecoscape-green-quality/f15_open_imagery_fallback.py
+
+permissions:
+  contents: read
+
+env:
+  MAPILLARY_ACCESS_TOKEN: ${{ secrets.MAPILLARY_ACCESS_TOKEN }}
+  F14R4_DRIVE_ID: 1-c6xXAqDTsc7Nj6AbtsVHb2cxueQ0e1V
+  F14R4_SHA256: b3ecc7728e201641c3a8d75d61cef060610f0c6d3dbb550a16b54dd48ccd21c6
+
+jobs:
+  probe-and-analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install probe dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy==2.2.6 pandas==2.3.2 pillow==11.3.0 requests==2.32.5
+
+      - name: Verify F15 and prepare canonical 50-case queue
+        shell: bash
+        run: |
+          set -euo pipefail
+          python research/ecoscape-green-quality/f15_open_imagery_fallback.py self-test
+          rm -rf /tmp/f15 /tmp/f14r4-source
+          mkdir -p /tmp/f15 /tmp/f14r4-source
+          curl --fail --location --retry 5 --retry-delay 3 \
+            "https://drive.usercontent.google.com/download?id=${F14R4_DRIVE_ID}&export=download&confirm=t" \
+            -o /tmp/f14r4-source/f14r4.zip
+          echo "${F14R4_SHA256}  /tmp/f14r4-source/f14r4.zip" | sha256sum -c -
+          unzip -q /tmp/f14r4-source/f14r4.zip -d /tmp/f14r4-source/package
+          python /tmp/f14r4-source/package/code/f14_open_imagery_auto.py write-default-queue \
+            --output /tmp/f15/F15_QUEUE_50.csv
+          python - <<'PY'
+          import pandas as pd
+          path='/tmp/f15/F15_QUEUE_50.csv'
+          df=pd.read_csv(path)
+          required=['caseId','canonicalCellId','lat','lng']
+          missing=[c for c in required if c not in df.columns]
+          if missing: raise SystemExit(f'Missing queue columns: {missing}')
+          assert len(df)==50
+          df.to_csv(path,index=False,encoding='utf-8-sig')
+          print(df[required].head().to_string(index=False))
+          PY
+
+      - name: Probe Wikimedia Commons and optional Mapillary
+        run: |
+          python research/ecoscape-green-quality/f15_open_imagery_fallback.py probe \
+            --queue /tmp/f15/F15_QUEUE_50.csv \
+            --output /tmp/f15/probe \
+            --radius 500 \
+            --max-images 4
+
+      - name: Read coverage gate
+        id: coverage
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          audit=json.loads(Path('/tmp/f15/probe/F15_COVERAGE_AUDIT.json').read_text())
+          print(json.dumps(audit,ensure_ascii=False,indent=2))
+          with open(os.environ['GITHUB_OUTPUT'],'a') as stream:
+              stream.write(f"ready={audit['casesReadyForAutomatedAnalysis']}\n")
+          PY
+
+      - name: Install open-source vision model
+        if: steps.coverage.outputs.ready != '0'
+        run: |
+          python -m pip install torch==2.8.0 torchvision==0.23.0 transformers==4.55.2 safetensors==0.6.2
+
+      - name: Analyze images transiently
+        if: steps.coverage.outputs.ready != '0'
+        run: |
+          python research/ecoscape-green-quality/f15_open_imagery_fallback.py analyze \
+            --manifest /tmp/f15/probe/F15_SELECTED_IMAGE_MANIFEST.csv \
+            --output /tmp/f15/analysis
+
+      - name: Create release receipt and prohibit image persistence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if find /tmp/f15 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) | grep -q .; then
+            echo 'Image bytes unexpectedly remained in the release workspace.'
+            exit 1
+          fi
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          receipt={
+            'buildId':'ecoscape-open-imagery-f15-20260820',
+            'googleImageryUsed':False,
+            'mapillaryTokenPresent':bool(os.environ.get('MAPILLARY_ACCESS_TOKEN')),
+            'imageBytesIncludedInArtifact':0,
+            'rankingEffect':'none',
+            'scoringEffect':'none',
+            'candidateOverride':0,
+          }
+          for key,path in [
+            ('coverageAudit',Path('/tmp/f15/probe/F15_COVERAGE_AUDIT.json')),
+            ('analysisAudit',Path('/tmp/f15/analysis/F15_ANALYSIS_AUDIT.json')),
+          ]:
+            if path.exists(): receipt[key]=json.loads(path.read_text())
+          Path('/tmp/f15/F15_RELEASE_RECEIPT.json').write_text(json.dumps(receipt,ensure_ascii=False,indent=2)+'\n')
+          PY
+          cd /tmp/f15
+          find . -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ecoscape-green-quality-f15-open-imagery
+          path: /tmp/f15
+          if-no-files-found: error
+          retention-days: 30

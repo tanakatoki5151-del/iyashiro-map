@@ -1,0 +1,133 @@
+name: ECOSCAPE F14R4 Publish Result
+
+on:
+  push:
+    branches:
+      - agent/ecoscape-green-quality-p1
+    paths:
+      - .github/workflows/ecoscape-green-quality-f14r4-publish-result.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish-result:
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_RUN_ID: '32315717557'
+      SOURCE_ARTIFACT: ecoscape-green-quality-f14r4-open-imagery
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/ecoscape-green-quality-p1
+          fetch-depth: 0
+
+      - name: Download F14R4 artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/f14r4-result
+          mkdir -p /tmp/f14r4-result
+          gh run download "$SOURCE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "$SOURCE_ARTIFACT" \
+            --dir /tmp/f14r4-result
+          find /tmp/f14r4-result -maxdepth 4 -type f -print
+
+      - name: Normalize machine-readable result
+        shell: bash
+        run: |
+          set -euo pipefail
+          destination='research/ecoscape-green-quality/F14R4_OPEN_IMAGERY_RESULT'
+          rm -rf "$destination"
+          mkdir -p "$destination"
+          find /tmp/f14r4-result -type f -exec cp {} "$destination"/ \;
+          python - <<'PY'
+          from __future__ import annotations
+          import json
+          from pathlib import Path
+
+          root = Path('research/ecoscape-green-quality/F14R4_OPEN_IMAGERY_RESULT')
+          def first(pattern: str):
+              values = sorted(root.glob(pattern))
+              return values[0] if values else None
+
+          coverage_path = first('*COVERAGE_AUDIT.json')
+          receipt_path = first('*RELEASE_RECEIPT.json')
+          analysis_path = first('*ANALYSIS_AUDIT.json')
+          coverage = json.loads(coverage_path.read_text()) if coverage_path else {}
+          receipt = json.loads(receipt_path.read_text()) if receipt_path else {}
+          analysis = json.loads(analysis_path.read_text()) if analysis_path else {}
+
+          summary = {
+              'buildId': 'ecoscape-open-imagery-auto-f14r4-result-20260820',
+              'sourceRunId': 32315717557,
+              'sourceArtifact': 'ecoscape-green-quality-f14r4-open-imagery',
+              'sourceScope': receipt.get('scope', 'external17_noauth_300m'),
+              'googleImageryUsed': False,
+              'mapillaryTokenPresent': receipt.get('mapillaryTokenPresent', False),
+              'cases': coverage.get('cases'),
+              'casesReadyForAutomatedAnalysis': coverage.get('casesReadyForAutomatedAnalysis', 0),
+              'casesInsufficient': coverage.get('casesInsufficient'),
+              'selectedImages': coverage.get('selectedImages', 0),
+              'mapillarySelectedImages': coverage.get('mapillarySelectedImages', 0),
+              'kartaViewSelectedImages': coverage.get('kartaViewSelectedImages', 0),
+              'coverageReleaseState': coverage.get('releaseState', 'UNKNOWN'),
+              'analysisExecuted': bool(analysis),
+              'analyzedImages': analysis.get('imagesAnalyzed', 0),
+              'imageBytesIncludedInArtifact': receipt.get('imageBytesIncludedInArtifact', 0),
+              'rankingEffect': 'none',
+              'scoringEffect': 'none',
+              'candidateOverride': 0,
+          }
+          if summary['casesReadyForAutomatedAnalysis']:
+              summary['nextGate'] = 'REVIEW_AUTOMATED_OPEN_IMAGERY_FEATURES'
+          elif not summary['mapillaryTokenPresent']:
+              summary['nextGate'] = 'ADD_MAPILLARY_ACCESS_TOKEN_OR_EXPAND_OPEN_SOURCE_COVERAGE'
+          else:
+              summary['nextGate'] = 'EXPAND_OPEN_SOURCE_COVERAGE'
+
+          (root / 'F14R4_CANONICAL_RESULT.json').write_text(
+              json.dumps(summary, ensure_ascii=False, indent=2) + '\n'
+          )
+          report = f'''# ECOSCAPE F14R4 automated open-imagery result
+
+- Source run: `{summary['sourceRunId']}`
+- Scope: `{summary['sourceScope']}`
+- Google imagery used: `{summary['googleImageryUsed']}`
+- Mapillary token present: `{summary['mapillaryTokenPresent']}`
+- Cases: `{summary['cases']}`
+- Cases ready for analysis: `{summary['casesReadyForAutomatedAnalysis']}`
+- Selected images: `{summary['selectedImages']}`
+- Mapillary selected: `{summary['mapillarySelectedImages']}`
+- KartaView selected: `{summary['kartaViewSelectedImages']}`
+- Analysis executed: `{summary['analysisExecuted']}`
+- Analyzed images: `{summary['analyzedImages']}`
+- Persisted image bytes: `{summary['imageBytesIncludedInArtifact']}`
+- Release state: `{summary['coverageReleaseState']}`
+- Next gate: `{summary['nextGate']}`
+
+No Google image was fetched, stored or analyzed. No canonical score, ranking or candidate was changed.
+'''
+          (root / 'F14R4_RESULT_REPORT.md').write_text(report)
+          PY
+          cd "$destination"
+          find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+
+      - name: Commit F14R4 result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- research/ecoscape-green-quality/F14R4_OPEN_IMAGERY_RESULT
+          if git diff --cached --quiet; then
+            echo 'No result change.'
+            exit 0
+          fi
+          git commit -m 'Publish ECOSCAPE F14R4 open-imagery result [skip ci]'
+          git push origin HEAD:agent/ecoscape-green-quality-p1

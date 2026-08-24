@@ -1,0 +1,51 @@
+name: ECOSCAPE F19 Self-Heal Failed Shards
+
+on:
+  push:
+    branches:
+      - agent/ecoscape-green-quality-p1
+    paths:
+      - .github/workflows/ecoscape-f19-self-heal.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  heal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 420
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      BRANCH: agent/ecoscape-green-quality-p1
+      WORKFLOW: ecoscape-f19-full-domain-temporal.yml
+    steps:
+      - name: Monitor and rerun failed jobs only
+        shell: bash
+        run: |
+          set -euo pipefail
+          retries=0
+          while [ "$retries" -le 2 ]; do
+            run=$(gh api "repos/${REPO}/actions/workflows/${WORKFLOW}/runs?branch=${BRANCH}&per_page=1")
+            id=$(jq -r '.workflow_runs[0].id // empty' <<<"$run")
+            status=$(jq -r '.workflow_runs[0].status // empty' <<<"$run")
+            conclusion=$(jq -r '.workflow_runs[0].conclusion // empty' <<<"$run")
+            echo "run=${id} status=${status} conclusion=${conclusion} retries=${retries}"
+            test -n "$id"
+            if [ "$status" != "completed" ]; then
+              sleep 60
+              continue
+            fi
+            if [ "$conclusion" = "success" ]; then
+              echo 'F19 completed successfully.'
+              exit 0
+            fi
+            if [ "$retries" -ge 2 ]; then
+              echo 'F19 still failed after two failed-job reruns.'
+              exit 1
+            fi
+            gh api --method POST "repos/${REPO}/actions/runs/${id}/rerun-failed-jobs"
+            retries=$((retries+1))
+            sleep 60
+          done

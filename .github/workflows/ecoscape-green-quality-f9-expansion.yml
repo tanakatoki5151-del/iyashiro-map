@@ -1,0 +1,137 @@
+name: ECOSCAPE Green Quality F9 NEXUS Expansion
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/ecoscape-green-quality-f9-expansion.yml
+      - research/ecoscape-green-quality/P1_HOLDOUT_EXPANSION_14_AREAS.csv
+      - research/ecoscape-green-quality/p1_temporal_runner_v3.py
+      - research/ecoscape-green-quality/p1_micro_pilot.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AREAS: ${{ github.workspace }}/research/ecoscape-green-quality/P1_HOLDOUT_EXPANSION_14_AREAS.csv
+
+jobs:
+  temporal-shards:
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [0, 1]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install geospatial runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy==2.2.6 pandas==2.3.2 rasterio==1.4.3 pystac==1.13.0 pystac-client==0.9.0 planetary-computer==1.0.0
+      - name: Run seven-area exact-cell shard
+        env:
+          ECOSCAPE_P1_OUTPUT: ${{ github.workspace }}/research/ecoscape-green-quality/f9-expansion-shard-${{ matrix.shard }}
+          ECOSCAPE_P1_AREAS_CSV: ${{ env.AREAS }}
+          ECOSCAPE_P1_YEAR_START: '2019'
+          ECOSCAPE_P1_YEAR_END: '2026'
+          ECOSCAPE_P1_SHARD_INDEX: ${{ matrix.shard }}
+          ECOSCAPE_P1_SHARD_COUNT: '2'
+          GDAL_HTTP_MAX_RETRY: '5'
+          GDAL_HTTP_RETRY_DELAY: '3'
+          CPL_VSIL_CURL_CACHE_SIZE: '30000000'
+        run: python research/ecoscape-green-quality/p1_temporal_runner_v3.py
+      - name: Validate shard
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          a=json.loads(Path(f"research/ecoscape-green-quality/f9-expansion-shard-{os.environ['SHARD']}/P1_AUDIT_V3.json").read_text())
+          print(json.dumps(a, indent=2, ensure_ascii=False))
+          assert a['pilotAreas'] == 7
+          assert a['sentinelSceneRows'] > 0
+          assert a['landsatSceneRows'] > 0
+          assert a['landsatThermalAssetMissingErrors'] == 0
+          assert a['medianFullCoreCoverageRate'] >= 0.75
+          assert a['rankingEffect'] == 'none'
+          assert a['scoringEffect'] == 'none'
+          PY
+      - name: Hash shard
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          out="research/ecoscape-green-quality/f9-expansion-shard-${SHARD}"
+          cp research/ecoscape-green-quality/P1_HOLDOUT_EXPANSION_14_AREAS.csv "$out/"
+          find "$out" -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > "$out/SHA256SUMS.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ecoscape-f9-expansion-shard-${{ matrix.shard }}
+          path: research/ecoscape-green-quality/f9-expansion-shard-${{ matrix.shard }}
+          if-no-files-found: error
+          retention-days: 30
+
+  aggregate:
+    needs: temporal-shards
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ecoscape-f9-expansion-shard-*
+          path: /tmp/f9-expansion
+      - name: Merge two shards and audit
+        run: |
+          python - <<'PY'
+          import csv, json, shutil, statistics
+          from pathlib import Path
+          root=Path('/tmp/f9-expansion')
+          out=Path('research/ecoscape-green-quality/F9_EXPANSION14_FINAL')
+          if out.exists(): shutil.rmtree(out)
+          out.mkdir(parents=True)
+          names=['P1_SENTINEL_SCENES_V3.csv','P1_SENTINEL_PERIOD_COMPOSITES_V3.csv','P1_LANDSAT_SUMMER_SCENES_V3.csv','P1_LANDSAT_MULTI_SUMMER_COMPOSITES_V3.csv','P1_COVERAGE_SUMMARY_V3.csv']
+          for name in names:
+              inputs=sorted(root.rglob(name))
+              if len(inputs)!=2: raise RuntimeError(f'{name}: expected 2, got {len(inputs)}')
+              header=None; rows=[]
+              for path in inputs:
+                  with path.open(newline='',encoding='utf-8-sig') as f:
+                      r=csv.reader(f); h=next(r)
+                      if header is None: header=h
+                      elif h!=header: raise RuntimeError(f'header mismatch {path}')
+                      rows.extend(r)
+              with (out/name).open('w',newline='',encoding='utf-8-sig') as f:
+                  w=csv.writer(f); w.writerow(header); w.writerows(rows)
+          errors=[]; audits=[]
+          for p in sorted(root.rglob('P1_ERRORS_V3.json')): errors.extend(json.loads(p.read_text()))
+          for p in sorted(root.rglob('P1_AUDIT_V3.json')): audits.append(json.loads(p.read_text()))
+          (out/'P1_ERRORS_V3.json').write_text(json.dumps(errors,ensure_ascii=False,indent=2)+'\n')
+          with (out/'P1_COVERAGE_SUMMARY_V3.csv').open(encoding='utf-8-sig') as f: coverage=list(csv.DictReader(f))
+          assert len(coverage)==14 and len({r['pilotId'] for r in coverage})==14
+          rates=[float(r['fullCoreCoverageRate']) for r in coverage]
+          audit={'buildId':'ecoscape-green-quality-f9-expansion14-20260819-v1','areas':14,'sentinelSceneRows':sum(int(a['sentinelSceneRows']) for a in audits),'landsatSceneRows':sum(int(a['landsatSceneRows']) for a in audits),'medianFullCoreCoverageRate':statistics.median(rates),'minimumFullCoreCoverageRate':min(rates),'coveragePass075Count':sum(x>=.75 for x in rates),'errorCount':len(errors),'landsatThermalAssetMissingErrors':sum(int(a.get('landsatThermalAssetMissingErrors',0)) for a in audits),'rankingEffect':'none','scoringEffect':'none','candidateOverride':0}
+          assert audit['coveragePass075Count']==14
+          assert audit['landsatThermalAssetMissingErrors']==0
+          (out/'F9_EXPANSION14_AUDIT.json').write_text(json.dumps(audit,ensure_ascii=False,indent=2)+'\n')
+          shutil.copy('research/ecoscape-green-quality/P1_HOLDOUT_EXPANSION_14_AREAS.csv',out/'P1_HOLDOUT_EXPANSION_14_AREAS.csv')
+          print(json.dumps(audit,indent=2,ensure_ascii=False))
+          PY
+      - name: Hash and package
+        run: |
+          cd research/ecoscape-green-quality/F9_EXPANSION14_FINAL
+          find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          cd ..
+          zip -qr ECOSCAPE_GREEN_QUALITY_F9_NEXUS_EXPANSION14_20260819.zip F9_EXPANSION14_FINAL
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ecoscape-green-quality-f9-nexus-expansion14-20260819
+          path: research/ecoscape-green-quality/ECOSCAPE_GREEN_QUALITY_F9_NEXUS_EXPANSION14_20260819.zip
+          if-no-files-found: error
+          retention-days: 30

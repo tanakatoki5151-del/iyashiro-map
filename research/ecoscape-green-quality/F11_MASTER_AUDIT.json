@@ -1,0 +1,106 @@
+{
+  "buildId": "ecoscape-green-quality-f11-fixed60-fulljoin-ranking-v1-20260820",
+  "dateJST": "2026-08-20",
+  "canonicalRepair": {
+    "newCurrent": "00_CURRENT_ECOSCAPE_GREEN_QUALITY_v6_F11_20260820.md",
+    "oldDuplicateF9CurrentsDetected": 2,
+    "phantomF10RegistryDetected": true,
+    "repairState": "PASS_DRIVE_REPAIRED"
+  },
+  "reference": {
+    "cohort": "P1_60_PERIOD_FINAL",
+    "cells": 60,
+    "externalRecalibration": false,
+    "frozenReferenceFile": "F11_FROZEN60_REFERENCE.json"
+  },
+  "externalValidation": {
+    "externalCells": 17,
+    "fixedReferenceCells": 60,
+    "coveragePass": 17,
+    "vitalityThresholdStable": 13,
+    "moistureThresholdStable": 13,
+    "heatThresholdStable": 14,
+    "allThreeStable": 7,
+    "selfRankBandChanged": {
+      "vitality": 9,
+      "moisture": 12,
+      "heat": 9
+    },
+    "descriptiveBands": {
+      "MIXED": 16,
+      "URBAN_LOW_GREEN_HEAT_ATTENTION": 1
+    },
+    "confidence": {
+      "MEDIUM": 10,
+      "HIGH": 7
+    }
+  },
+  "staticExactJoin": {
+    "externalCells": 17,
+    "layers": {
+      "B114": {"sourceRows": 120662, "duplicateCellIds": 0, "exactMatches": 17, "missing": 0},
+      "B118": {"sourceRows": 120662, "duplicateCellIds": 0, "exactMatches": 17, "missing": 0},
+      "B101": {"sourceRows": 120662, "duplicateCellIds": 0, "exactMatches": 17, "missing": 0},
+      "B120": {"sourceRows": 120662, "duplicateCellIds": 0, "exactMatches": 17, "missing": 0}
+    },
+    "duplicateExternalCellIds": 0,
+    "allLayersExact17": true,
+    "selfRankRecalibrationProhibited": true,
+    "frozen60Applied": true
+  },
+  "rankings": {
+    "environmentRows": 120662,
+    "residentialRows": 120662,
+    "environmentTierCounts": {
+      "D_NEUTRAL": 62453,
+      "F_CAUTION": 24405,
+      "B_ROBUST_CANDIDATE": 9957,
+      "S_ROBUST_STRONG_REDUNDANT": 8643,
+      "E_MIXED": 7984,
+      "C_POINT_CANDIDATE_NOT_ROBUST": 4159,
+      "A1_ROBUST_STRONG": 1692,
+      "A2_ROBUST_CANDIDATE_REDUNDANT": 1255,
+      "U_UNKNOWN": 114
+    },
+    "residentialTierCounts": {
+      "E_RESIDENTIAL_PLAUSIBLE_OTHER": 86101,
+      "F_NONRESIDENTIAL_OR_UNKNOWN": 18429,
+      "A_RESIDENTIAL_ROBUST_ZONE": 11972,
+      "D_RESIDENTIAL_PLAUSIBLE_POINT": 3516,
+      "S_RESIDENTIAL_ROBUST_STRONG_ZONE_A": 644
+    },
+    "environmentRankUnique": true,
+    "residentialRankUnique": true,
+    "canonicalCellsUnique": 120662,
+    "magneticTieBreakOnly": true,
+    "magneticMaxTierEffect": 0,
+    "rankingStatus": "PROVISIONAL_REVIEW_ONLY",
+    "canonicalMutation": 0
+  },
+  "dashboard": {
+    "driveHtml": "ECOSCAPE_GREEN_QUALITY_F11_DASHBOARD.html",
+    "githubRoute": "/research/ecoscape-green-quality-f11",
+    "status": "RESEARCH_UI_READY"
+  },
+  "locks": {
+    "externalCohortRecalibration": false,
+    "rankingEffectOnCanonicalB114": "none",
+    "scoringEffect": "none",
+    "candidateOverride": 0,
+    "wetHeavyNegativeLabel": "HOLD_UNTIL_POSITIVE_CALIBRATION",
+    "maintenanceCleanliness": "UNKNOWN",
+    "magneticUse": "TIE_BREAK_ONLY"
+  },
+  "formalAdoption": {
+    "descriptiveCards": "PASS_RESEARCH_RELEASE",
+    "provisionalRanks": "PASS_REVIEW_ONLY",
+    "canonicalRankingMutation": false,
+    "formalPropertyDecisionUse": "HOLD"
+  },
+  "driveRelease": {
+    "bundleId": "1eCA9lzCtKpeV-380heOZc56-f4aIknHo",
+    "sha256": "3fa04149c0dbf40dba8d0cb7da5a578df7e07440211bc75a7e48f28253ff7af3",
+    "files": 26,
+    "zipCrc": "PASS"
+  }
+}

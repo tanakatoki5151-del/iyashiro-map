@@ -1,0 +1,72 @@
+name: ECOSCAPE F19 Release Publisher
+
+on:
+  push:
+    branches:
+      - agent/ecoscape-green-quality-p1
+    paths:
+      - .github/workflows/ecoscape-f19-release-publisher.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 420
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      BRANCH: agent/ecoscape-green-quality-p1
+      WORKFLOW: ecoscape-f19-full-domain-temporal.yml
+      TAG: ecoscape-f19-temporal-v1
+      ASSET: ECOSCAPE_F19_FULL_DOMAIN_TEMPORAL_120662_20260825.zip
+    steps:
+      - name: Wait for a successful F19 run
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/f19-release
+          for attempt in $(seq 1 400); do
+            run=$(gh api "repos/${REPO}/actions/workflows/${WORKFLOW}/runs?branch=${BRANCH}&per_page=1")
+            id=$(jq -r '.workflow_runs[0].id // empty' <<<"$run")
+            status=$(jq -r '.workflow_runs[0].status // empty' <<<"$run")
+            conclusion=$(jq -r '.workflow_runs[0].conclusion // empty' <<<"$run")
+            echo "attempt=${attempt} run=${id} status=${status} conclusion=${conclusion}"
+            if [ -n "$id" ] && [ "$status" = "completed" ] && [ "$conclusion" = "success" ]; then
+              echo "$id" > /tmp/f19-release/run_id.txt
+              break
+            fi
+            sleep 60
+          done
+          test -s /tmp/f19-release/run_id.txt
+
+      - name: Download final Actions artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          id=$(cat /tmp/f19-release/run_id.txt)
+          gh api "repos/${REPO}/actions/runs/${id}/artifacts" > /tmp/f19-release/artifacts.json
+          artifact_id=$(jq -r '.artifacts[] | select(.name=="ecoscape-f19-full-domain-temporal-120662") | .id' /tmp/f19-release/artifacts.json | head -1)
+          test -n "$artifact_id"
+          gh api "repos/${REPO}/actions/artifacts/${artifact_id}/zip" > /tmp/f19-release/outer.zip
+          unzip -q /tmp/f19-release/outer.zip -d /tmp/f19-release/unpacked
+          nested=$(find /tmp/f19-release/unpacked -name "$ASSET" -print -quit)
+          test -n "$nested"
+          cp "$nested" "/tmp/f19-release/$ASSET"
+          sha256sum "/tmp/f19-release/$ASSET" > /tmp/f19-release/SHA256SUMS.txt
+
+      - name: Create or update stable prerelease asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --repo "$REPO" \
+              --target "$BRANCH" \
+              --title 'ECOSCAPE F19 Full-Domain Temporal V1' \
+              --notes 'Research-only full-domain temporal evidence. rankingEffect/scoringEffect none.' \
+              --prerelease
+          fi
+          gh release upload "$TAG" "/tmp/f19-release/$ASSET" /tmp/f19-release/SHA256SUMS.txt --repo "$REPO" --clobber

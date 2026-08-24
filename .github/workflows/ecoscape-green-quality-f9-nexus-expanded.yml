@@ -1,0 +1,291 @@
+name: ECOSCAPE Green Quality F9 NEXUS Expanded Exact Holdout
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/ecoscape-green-quality-f9-nexus-expanded.yml
+      - research/ecoscape-green-quality/P1_HOLDOUT_15_NEXUS_EXACT_ADDRESSES.csv
+      - research/ecoscape-green-quality/p1_temporal_runner_v3.py
+      - research/ecoscape-green-quality/p1_micro_pilot.py
+      - research/ecoscape-green-quality/f7_evidence_gate.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_ADDRESSES: ${{ github.workspace }}/research/ecoscape-green-quality/P1_HOLDOUT_15_NEXUS_EXACT_ADDRESSES.csv
+
+jobs:
+  resolve-exact-cells:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install requests==2.32.5 pandas==2.3.2
+      - name: Resolve 15 exact addresses through production LocationProfile
+        shell: bash
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+          import json, time
+          from pathlib import Path
+          import pandas as pd
+          import requests
+
+          source = pd.read_csv(Path('research/ecoscape-green-quality/P1_HOLDOUT_15_NEXUS_EXACT_ADDRESSES.csv'))
+          rows = []
+          receipts = []
+          endpoint = 'https://iyashiro-map.vercel.app/api/profile'
+          session = requests.Session()
+          session.headers['User-Agent'] = 'ECOSCAPE-F9-NEXUS-exact-holdout/1.0'
+          for ordinal, row in source.iterrows():
+              response = session.get(endpoint, params={'q': row['address']}, timeout=45)
+              receipt = {
+                  'candidateId': row['candidateId'],
+                  'address': row['address'],
+                  'httpStatus': response.status_code,
+              }
+              response.raise_for_status()
+              payload = response.json()
+              anchor = payload.get('queryAnchor') or {}
+              spatial = payload.get('spatialContext') or {}
+              location = payload.get('location') or {}
+              receipt.update({
+                  'matchedAddress': location.get('matchedAddress'),
+                  'precisionClass': anchor.get('precisionClass'),
+                  'cellId': spatial.get('cellId'),
+                  'lat': anchor.get('lat'),
+                  'lng': anchor.get('lng'),
+              })
+              receipts.append(receipt)
+              if not payload.get('success', True):
+                  raise RuntimeError(receipt)
+              if not spatial.get('supported') or not spatial.get('cellId'):
+                  raise RuntimeError(receipt)
+              if anchor.get('precisionClass') not in {'GSI_ADDRESS_POINT', 'EXPLICIT_COORDINATE'}:
+                  raise RuntimeError(f'Address precision not exact enough: {receipt}')
+              rows.append({
+                  'pilotId': f"X{ordinal + 1:02d}",
+                  'pilotCategory': 'NEXUS_EXPANDED_EXACT',
+                  'canonicalCellId': spatial['cellId'],
+                  'latitude': float(anchor['lat']),
+                  'longitude': float(anchor['lng']),
+                  'officialAreaLabel': location.get('matchedAddress') or row['address'],
+                  'marketReference': row['buildingName'],
+                  'candidateId': row['candidateId'],
+                  'inputAddress': row['address'],
+                  'precisionClass': anchor.get('precisionClass'),
+              })
+              time.sleep(0.15)
+
+          resolved = pd.DataFrame(rows)
+          if len(resolved) != 15:
+              raise RuntimeError(f'Expected 15 resolved addresses, got {len(resolved)}')
+          if resolved['canonicalCellId'].isna().any():
+              raise RuntimeError('Missing canonical cell after resolution')
+          out = Path('research/ecoscape-green-quality/F9_NEXUS_EXPANDED_RESOLVED')
+          out.mkdir(parents=True, exist_ok=True)
+          resolved.to_csv(out / 'P1_HOLDOUT_15_NEXUS_EXACT_RESOLVED.csv', index=False)
+          Path(out / 'ADDRESS_RESOLUTION_RECEIPTS.json').write_text(
+              json.dumps(receipts, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
+          )
+          summary = {
+              'buildId': 'ecoscape-green-quality-f9-nexus-expanded-resolution-20260819-v1',
+              'inputAddresses': 15,
+              'resolvedAddresses': len(resolved),
+              'uniqueCells': int(resolved['canonicalCellId'].nunique()),
+              'duplicateCellRows': int(len(resolved) - resolved['canonicalCellId'].nunique()),
+              'precisionClassCounts': {str(k): int(v) for k, v in resolved['precisionClass'].value_counts().items()},
+              'rankingEffect': 'none',
+              'scoringEffect': 'none',
+              'candidateOverride': 0,
+          }
+          Path(out / 'ADDRESS_RESOLUTION_AUDIT.json').write_text(
+              json.dumps(summary, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
+          )
+          print(json.dumps(summary, ensure_ascii=False, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ecoscape-f9-nexus-expanded-resolved
+          path: research/ecoscape-green-quality/F9_NEXUS_EXPANDED_RESOLVED
+          if-no-files-found: error
+          retention-days: 30
+
+  temporal-shards:
+    needs: resolve-exact-cells
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        shard: [0, 1, 2]
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install geospatial runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy==2.2.6 pandas==2.3.2 rasterio==1.4.3 pystac==1.13.0 pystac-client==0.9.0 planetary-computer==1.0.0
+      - uses: actions/download-artifact@v4
+        with:
+          name: ecoscape-f9-nexus-expanded-resolved
+          path: /tmp/ecoscape-f9-resolved
+      - name: Run five-address period-specific shard
+        env:
+          ECOSCAPE_P1_OUTPUT: ${{ github.workspace }}/research/ecoscape-green-quality/f9-nexus-expanded-shard-${{ matrix.shard }}
+          ECOSCAPE_P1_AREAS_CSV: /tmp/ecoscape-f9-resolved/P1_HOLDOUT_15_NEXUS_EXACT_RESOLVED.csv
+          ECOSCAPE_P1_YEAR_START: '2019'
+          ECOSCAPE_P1_YEAR_END: '2026'
+          ECOSCAPE_P1_SHARD_INDEX: ${{ matrix.shard }}
+          ECOSCAPE_P1_SHARD_COUNT: '3'
+          GDAL_HTTP_MAX_RETRY: '5'
+          GDAL_HTTP_RETRY_DELAY: '3'
+          CPL_VSIL_CURL_CACHE_SIZE: '30000000'
+        run: python research/ecoscape-green-quality/p1_temporal_runner_v3.py
+      - name: Validate shard
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path(f"research/ecoscape-green-quality/f9-nexus-expanded-shard-{os.environ['SHARD']}/P1_AUDIT_V3.json")
+          audit = json.loads(path.read_text())
+          print(json.dumps(audit, indent=2, ensure_ascii=False))
+          assert audit['pilotAreas'] == 5
+          assert audit['sentinelSceneRows'] > 0
+          assert audit['landsatSceneRows'] > 0
+          assert audit['landsatThermalAssetMissingErrors'] == 0
+          assert audit['medianFullCoreCoverageRate'] >= 0.75
+          assert audit['rankingEffect'] == 'none'
+          assert audit['scoringEffect'] == 'none'
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ecoscape-f9-nexus-expanded-shard-${{ matrix.shard }}
+          path: research/ecoscape-green-quality/f9-nexus-expanded-shard-${{ matrix.shard }}
+          if-no-files-found: error
+          retention-days: 30
+
+  aggregate-expanded:
+    needs: temporal-shards
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install numpy==2.2.6 pandas==2.3.2
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ecoscape-f9-nexus-expanded-shard-*
+          path: /tmp/ecoscape-f9-shards
+      - uses: actions/download-artifact@v4
+        with:
+          name: ecoscape-f9-nexus-expanded-resolved
+          path: /tmp/ecoscape-f9-resolved
+      - name: Merge 3 shards and build temporal evidence
+        shell: bash
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+          import csv, hashlib, json, shutil, statistics
+          from pathlib import Path
+
+          root = Path('/tmp/ecoscape-f9-shards')
+          out = Path('research/ecoscape-green-quality/F9_NEXUS_EXPANDED_FINAL')
+          if out.exists(): shutil.rmtree(out)
+          out.mkdir(parents=True)
+          csv_names = [
+              'P1_SENTINEL_SCENES_V3.csv',
+              'P1_SENTINEL_PERIOD_COMPOSITES_V3.csv',
+              'P1_LANDSAT_SUMMER_SCENES_V3.csv',
+              'P1_LANDSAT_MULTI_SUMMER_COMPOSITES_V3.csv',
+              'P1_COVERAGE_SUMMARY_V3.csv',
+          ]
+          for name in csv_names:
+              inputs = sorted(root.rglob(name))
+              if len(inputs) != 3:
+                  raise RuntimeError(f'{name}: expected 3 shards, found {len(inputs)}')
+              header = None; rows = []
+              for path in inputs:
+                  with path.open(newline='', encoding='utf-8-sig') as stream:
+                      reader = csv.reader(stream); current_header = next(reader)
+                      if header is None: header = current_header
+                      elif current_header != header: raise RuntimeError(f'header mismatch: {path}')
+                      rows.extend(reader)
+              with (out / name).open('w', newline='', encoding='utf-8-sig') as stream:
+                  writer = csv.writer(stream); writer.writerow(header); writer.writerows(rows)
+
+          errors=[]; audits=[]
+          for path in sorted(root.rglob('P1_ERRORS_V3.json')): errors.extend(json.loads(path.read_text()))
+          for path in sorted(root.rglob('P1_AUDIT_V3.json')): audits.append(json.loads(path.read_text()))
+          (out/'P1_ERRORS_V3.json').write_text(json.dumps(errors,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          with (out/'P1_COVERAGE_SUMMARY_V3.csv').open(encoding='utf-8-sig') as stream:
+              coverage=list(csv.DictReader(stream))
+          rates=[float(row['fullCoreCoverageRate']) for row in coverage]
+          if len(coverage)!=15 or len({r['pilotId'] for r in coverage})!=15:
+              raise RuntimeError(f'coverage rows={len(coverage)}')
+          final={
+              'buildId':'ecoscape-green-quality-f9-nexus-expanded-temporal-20260819-v1',
+              'expandedAreas':15,
+              'shards':3,
+              'sentinelSceneRows':sum(int(a['sentinelSceneRows']) for a in audits),
+              'landsatSceneRows':sum(int(a['landsatSceneRows']) for a in audits),
+              'errorCount':len(errors),
+              'landsatThermalAssetMissingErrors':sum(int(a.get('landsatThermalAssetMissingErrors',0)) for a in audits),
+              'medianFullCoreCoverageRate':statistics.median(rates),
+              'minimumFullCoreCoverageRate':min(rates),
+              'coverageRateAtLeast075Count':sum(rate>=0.75 for rate in rates),
+              'rankingEffect':'none','scoringEffect':'none','candidateOverride':0,
+              'releaseState':'EXTERNAL_HOLDOUT_EVIDENCE_ONLY',
+          }
+          if final['coverageRateAtLeast075Count']!=15 or final['landsatThermalAssetMissingErrors']!=0:
+              raise RuntimeError(final)
+          (out/'F9_EXPANDED_AUDIT.json').write_text(json.dumps(final,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          shutil.copy('/tmp/ecoscape-f9-resolved/P1_HOLDOUT_15_NEXUS_EXACT_RESOLVED.csv',out/'P1_HOLDOUT_15_NEXUS_EXACT_RESOLVED.csv')
+          shutil.copy('/tmp/ecoscape-f9-resolved/ADDRESS_RESOLUTION_AUDIT.json',out/'ADDRESS_RESOLUTION_AUDIT.json')
+          shutil.copy('/tmp/ecoscape-f9-resolved/ADDRESS_RESOLUTION_RECEIPTS.json',out/'ADDRESS_RESOLUTION_RECEIPTS.json')
+          print(json.dumps(final,ensure_ascii=False,indent=2))
+          PY
+          python research/ecoscape-green-quality/f7_evidence_gate.py \
+            --sentinel research/ecoscape-green-quality/F9_NEXUS_EXPANDED_FINAL/P1_SENTINEL_PERIOD_COMPOSITES_V3.csv \
+            --landsat research/ecoscape-green-quality/F9_NEXUS_EXPANDED_FINAL/P1_LANDSAT_MULTI_SUMMER_COMPOSITES_V3.csv \
+            --coverage research/ecoscape-green-quality/F9_NEXUS_EXPANDED_FINAL/P1_COVERAGE_SUMMARY_V3.csv \
+            --pilots research/ecoscape-green-quality/F9_NEXUS_EXPANDED_FINAL/P1_HOLDOUT_15_NEXUS_EXACT_RESOLVED.csv \
+            --output research/ecoscape-green-quality/F9_NEXUS_EXPANDED_FINAL/F7_TEMPORAL_ONLY
+      - name: Validate locks and package
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          gate=json.loads(Path('research/ecoscape-green-quality/F9_NEXUS_EXPANDED_FINAL/F7_TEMPORAL_ONLY/F7_ADOPTION_GATE.json').read_text())
+          assert gate['pilotAreas']==15
+          assert gate['gateResults']['temporalCoverage']=='PASS'
+          assert gate['rankingPromotionAllowed'] is False
+          assert gate['rankingEffect']=='none'
+          assert gate['scoringEffect']=='none'
+          assert gate['candidateOverride']==0
+          print(json.dumps(gate,ensure_ascii=False,indent=2))
+          PY
+          cd research/ecoscape-green-quality/F9_NEXUS_EXPANDED_FINAL
+          find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          cd ..
+          zip -r ECOSCAPE_GREEN_QUALITY_F9_NEXUS_EXPANDED_15_20260819.zip F9_NEXUS_EXPANDED_FINAL
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ecoscape-green-quality-f9-nexus-expanded-15-20260819
+          path: research/ecoscape-green-quality/ECOSCAPE_GREEN_QUALITY_F9_NEXUS_EXPANDED_15_20260819.zip
+          if-no-files-found: error
+          retention-days: 30
