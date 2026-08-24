@@ -1,0 +1,257 @@
+name: ECOSCAPE F20 Runtime Card Release
+
+on:
+  push:
+    branches:
+      - agent/ecoscape-green-quality-p1
+    paths:
+      - .github/workflows/ecoscape-f20-runtime-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  build-verify-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      PROJECT_FOLDER_ID: 1dkn21L2j1QQhMe_A4U200i4hGVfal6Aa
+      F20_TITLE: ECOSCAPE_ENVIRONMENT_CARD_120662_F20_20260824.zip
+      BUILDER_TITLE: ECOSCAPE_F20_RUNTIME_BUILDER_20260825.zip
+      RELEASE_BRANCH: agent/ecoscape-f20-environment-card
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Discover and download exact Drive artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install requests==2.32.5
+          cat > /tmp/download_drive_exact.py <<'PY'
+          from pathlib import Path
+          import io, re, requests, sys, zipfile
+
+          folder_id, title, expected_member, output = sys.argv[1:]
+          session = requests.Session()
+          session.headers['User-Agent'] = 'ECOSCAPE-F20-Runtime-Release/1.0'
+          html = session.get(
+              f'https://drive.google.com/drive/folders/{folder_id}',
+              timeout=60,
+          ).text
+          index = html.find(title)
+          if index < 0:
+              raise SystemExit(f'Title not found in public folder HTML: {title}')
+          snippet = html[max(0, index - 12000): index + 12000]
+          candidates = []
+          for match in re.finditer(r'[A-Za-z0-9_-]{20,80}', snippet):
+              value = match.group(0)
+              if value == folder_id or value in candidates:
+                  continue
+              candidates.append(value)
+          candidates.sort(key=lambda value: abs(snippet.find(value) - snippet.find(title)))
+          errors = []
+          for file_id in candidates[:100]:
+              try:
+                  response = session.get(
+                      'https://drive.usercontent.google.com/download',
+                      params={'id': file_id, 'export': 'download', 'confirm': 't'},
+                      timeout=120,
+                  )
+                  response.raise_for_status()
+                  data = response.content
+                  with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                      names = archive.namelist()
+                      if not any(name.endswith(expected_member) for name in names):
+                          continue
+                  Path(output).write_bytes(data)
+                  Path(output + '.drive-id').write_text(file_id + '\n')
+                  print(f'DOWNLOAD_PASS title={title} id={file_id} bytes={len(data)}')
+                  break
+              except Exception as exc:
+                  errors.append((file_id, repr(exc)))
+          else:
+              raise SystemExit(f'Exact artifact not resolved: {title}; errors={errors[-5:]}')
+          PY
+          mkdir -p /tmp/ecoscape-f20
+          python /tmp/download_drive_exact.py "$PROJECT_FOLDER_ID" "$F20_TITLE" \
+            ECOSCAPE_ENVIRONMENT_CARD_120662_F20.csv.gz /tmp/ecoscape-f20/f20.zip
+          python /tmp/download_drive_exact.py "$PROJECT_FOLDER_ID" "$BUILDER_TITLE" \
+            build_f20_runtime.py /tmp/ecoscape-f20/builder.zip
+          unzip -q /tmp/ecoscape-f20/f20.zip -d /tmp/ecoscape-f20/f20
+          unzip -q /tmp/ecoscape-f20/builder.zip -d /tmp/ecoscape-f20/builder
+          find /tmp/ecoscape-f20 -maxdepth 4 -type f | sort
+
+      - name: Generate compact runtime and card interface
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install numpy==2.2.6 pandas==2.3.2
+          F20_CSV=$(find /tmp/ecoscape-f20/f20 -name ECOSCAPE_ENVIRONMENT_CARD_120662_F20.csv.gz -print -quit)
+          test -n "$F20_CSV"
+          python /tmp/ecoscape-f20/builder/build_f20_runtime.py \
+            --csv "$F20_CSV" \
+            --app-root iyashiro-map-github-vercel \
+            --templates /tmp/ecoscape-f20/builder/templates
+          test -s iyashiro-map-github-vercel/app/lib/ecoscape-f20/data.ts
+          test -s iyashiro-map-github-vercel/app/api/ecoscape-card/route.ts
+          test -s iyashiro-map-github-vercel/app/research/ecoscape-environment-card-f20/page.tsx
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: iyashiro-map-github-vercel/package-lock.json
+
+      - name: Build and run existing regression suite
+        working-directory: iyashiro-map-github-vercel
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x scripts/*.sh
+          mkdir -p .openai .wrangler
+          printf '%s\n' '{"d1":null,"r2":null}' > .openai/hosting.json
+          npm ci
+          npm test
+
+      - name: Production-mode API and page readback
+        working-directory: iyashiro-map-github-vercel
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup npm run start -- --port 3000 > /tmp/ecoscape-f20-server.log 2>&1 &
+          echo $! > /tmp/ecoscape-f20-server.pid
+          for attempt in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:3000/api/health >/tmp/f20-health.json; then
+              break
+            fi
+            if ! kill -0 "$(cat /tmp/ecoscape-f20-server.pid)" 2>/dev/null; then
+              cat /tmp/ecoscape-f20-server.log
+              exit 1
+            fi
+            sleep 1
+          done
+          curl -fsS 'http://127.0.0.1:3000/api/ecoscape-card?cellId=g130-240' > /tmp/f20-card.json
+          curl -fsS 'http://127.0.0.1:3000/research/ecoscape-environment-card-f20?cellId=g130-240' > /tmp/f20-page.html
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          payload=json.loads(Path('/tmp/f20-card.json').read_text())
+          assert payload['cellId']=='g130-240'
+          assert payload['card']['canonicalCellId']=='g130-240'
+          assert payload['runtime']['rows']==120662
+          assert payload['runtime']['rankingEffect']=='none'
+          assert payload['runtime']['scoringEffect']=='none'
+          assert payload['runtime']['candidateOverride']==0
+          page=Path('/tmp/f20-page.html').read_text()
+          assert 'この土地は、どんな環境か' in page
+          print(json.dumps({
+            'cellId':payload['cellId'],
+            'runtime':payload['runtime'],
+            'cardKeys':sorted(payload['card']),
+          },ensure_ascii=False,indent=2))
+          PY
+
+      - name: Create isolated F20 release branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -C "$RELEASE_BRANCH" origin/main
+          git add \
+            iyashiro-map-github-vercel/app/lib/ecoscape-f20 \
+            iyashiro-map-github-vercel/app/api/ecoscape-card \
+            iyashiro-map-github-vercel/app/research/ecoscape-environment-card-f20 \
+            iyashiro-map-github-vercel/research/ecoscape-environment-cards/F20_RUNTIME_BUILD_AUDIT.json
+          git diff --cached --check
+          git commit -m 'Add ECOSCAPE F20 read-only environment cards'
+          git push --force origin "$RELEASE_BRANCH"
+
+      - name: Create or refresh draft pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh pr view "$RELEASE_BRANCH" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh pr edit "$RELEASE_BRANCH" --repo "$GITHUB_REPOSITORY" \
+              --title 'Add ECOSCAPE F20 120,662-cell environment cards' \
+              --body-file - <<'EOF'
+          ## Purpose
+
+          Expose the Drive-canonical ECOSCAPE F20 environment card as a read-only, canonical-cell lookup and a Japanese 3-minute review page.
+
+          ## Scope
+
+          - 120,662 canonical cells
+          - 2019–2026 temporal vegetation and multi-summer heat
+          - eight-direction ventilation potential
+          - UNDERLAND water/moisture context
+          - magnetic background and ELF field-measurement priority
+          - API: `/api/ecoscape-card?cellId=g130-240`
+          - page: `/research/ecoscape-environment-card-f20?cellId=g130-240`
+
+          ## Locks
+
+          - rankingEffect: none
+          - scoringEffect: none
+          - candidateOverride: 0
+          - maintenance/cleanliness remains out of scope
+          - ventilation is potential, not measured wind
+          - magnetic high/low is not good/bad
+          - missing observations remain UNKNOWN
+          EOF
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" --draft \
+              --base main --head "$RELEASE_BRANCH" \
+              --title 'Add ECOSCAPE F20 120,662-cell environment cards' \
+              --body-file - <<'EOF'
+          ## Purpose
+
+          Expose the Drive-canonical ECOSCAPE F20 environment card as a read-only, canonical-cell lookup and a Japanese 3-minute review page.
+
+          ## Scope
+
+          - 120,662 canonical cells
+          - 2019–2026 temporal vegetation and multi-summer heat
+          - eight-direction ventilation potential
+          - UNDERLAND water/moisture context
+          - magnetic background and ELF field-measurement priority
+          - API: `/api/ecoscape-card?cellId=g130-240`
+          - page: `/research/ecoscape-environment-card-f20?cellId=g130-240`
+
+          ## Locks
+
+          - rankingEffect: none
+          - scoringEffect: none
+          - candidateOverride: 0
+          - maintenance/cleanliness remains out of scope
+          - ventilation is potential, not measured wind
+          - magnetic high/low is not good/bad
+          - missing observations remain UNKNOWN
+          EOF
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ecoscape-f20-runtime-release-evidence
+          path: |
+            /tmp/f20-card.json
+            /tmp/f20-page.html
+            /tmp/f20-health.json
+            /tmp/ecoscape-f20-server.log
+            iyashiro-map-github-vercel/research/ecoscape-environment-cards/F20_RUNTIME_BUILD_AUDIT.json
+          if-no-files-found: warn
+          retention-days: 30
